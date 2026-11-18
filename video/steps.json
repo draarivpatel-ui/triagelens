@@ -1,194 +1,69 @@
-{
-  "title": "TriageLens demo choreography",
-  "viewport": {
-    "width": 1920,
-    "height": 1080
-  },
-  "browser": "headless Chrome (--headless=new --mute-audio), isolated throwaway profile",
-  "verification": {
-    "method": "At 1920x1080, each target was scrolled into view and its center checked with document.elementFromPoint against the listed selector. At each cue the live DOM numbers were read and matched against video/narration.txt.",
-    "consoleErrors": 0,
-    "externalRequests": 0,
-    "horizontalOverflowAt390px": false,
-    "mobileScrollWidth": 390,
-    "mobileClientWidth": 390,
-    "stepsChecked": 13
-  },
-  "steps": [
-    {
-      "time": "0:00-0:15",
-      "label": "Hero and local-only claim",
-      "selector": "#hero-title",
-      "x": 436,
-      "y": 241,
-      "elementFromPoint": "H1#hero-title",
-      "action": "wait",
-      "durationMs": 1500,
-      "narration": "Intro: who does the model miss?",
-      "scrollY": 0,
-      "liveValuesVerified": true
-    },
-    {
-      "time": "0:15-0:25",
-      "label": "Select clinic benchmark",
-      "selector": "#scenario",
-      "x": 453,
-      "y": 540,
-      "elementFromPoint": "SELECT#scenario.select",
-      "action": "select",
-      "value": "clinic",
-      "durationMs": 600,
-      "narration": "Synthetic clinic scenario.",
-      "scrollY": 574,
-      "liveValuesVerified": true
-    },
-    {
-      "time": "0:25-0:40",
-      "label": "Inspect live gap card",
-      "selector": "#m-gap",
-      "x": 1432,
-      "y": 540,
-      "elementFromPoint": "STRONG#m-gap.metric-value",
-      "action": "wait",
-      "durationMs": 1200,
-      "narration": "Two real models train locally.",
-      "scrollY": 762,
-      "liveValuesVerified": true
-    },
-    {
-      "time": "0:40-0:55",
-      "label": "Raise label bias",
-      "selector": "#bias",
-      "x": 781,
-      "y": 540,
-      "elementFromPoint": "INPUT#bias.range",
-      "action": "range",
-      "value": "0.8",
-      "durationMs": 1200,
-      "narration": "Bias 0.80: gap rises to 20.5%, EO reports a 7.1 pp increase.",
-      "scrollY": 570,
-      "liveValuesVerified": true
-    },
-    {
-      "time": "0:55-1:05",
-      "label": "Adjust decision threshold",
-      "selector": "#threshold",
-      "x": 1107,
-      "y": 540,
-      "elementFromPoint": "INPUT#threshold.range",
-      "action": "range",
-      "value": "0.3",
-      "durationMs": 800,
-      "narration": "Global threshold controls recall.",
-      "scrollY": 570,
-      "liveValuesVerified": true
-    },
-    {
-      "time": "1:05-1:10",
-      "label": "Restore audited label bias",
-      "selector": "#bias",
-      "x": 781,
-      "y": 540,
-      "elementFromPoint": "INPUT#bias.range",
-      "action": "range",
-      "value": "0.6",
-      "durationMs": 500,
-      "narration": "Restore the audited label bias.",
-      "scrollY": 570,
-      "liveValuesVerified": true
-    },
-    {
-      "time": "1:10-1:15",
-      "label": "Restore audited decision threshold",
-      "selector": "#threshold",
-      "x": 1107,
-      "y": 540,
-      "elementFromPoint": "INPUT#threshold.range",
-      "action": "range",
-      "value": "0.35",
-      "durationMs": 500,
-      "narration": "Restore the audited decision threshold.",
-      "scrollY": 570,
-      "liveValuesVerified": true
-    },
-    {
-      "time": "1:15-1:30",
-      "label": "Inspect strategy trade-off table",
-      "selector": "#strategy-rows tr:nth-child(3)",
-      "x": 437,
-      "y": 511,
-      "elementFromPoint": "TD.policy-name",
-      "action": "wait",
-      "durationMs": 2500,
-      "narration": "At defaults EO gap 24.7% to 22.4%, recall +1.8 pp, selection gap +3.6 pp.",
-      "scrollY": 2470,
-      "liveValuesVerified": true
-    },
-    {
-      "time": "1:30-1:40",
-      "label": "Inspect ROC chart",
-      "selector": "#roc-canvas",
-      "x": 455,
-      "y": 386,
-      "elementFromPoint": "CANVAS#roc-canvas",
-      "action": "wait",
-      "durationMs": 1200,
-      "narration": "Live held-out ROC curve.",
-      "scrollY": 1179,
-      "liveValuesVerified": true
-    },
-    {
-      "time": "1:40-1:50",
-      "label": "Inspect feature weights",
-      "selector": "#weight-bars .weight-row:nth-child(3)",
-      "x": 461,
-      "y": 540,
-      "elementFromPoint": "SPAN",
-      "action": "wait",
-      "durationMs": 1200,
-      "narration": "Interpretable coefficients.",
-      "scrollY": 3124,
-      "liveValuesVerified": true
-    },
-    {
-      "time": "1:50-2:00",
-      "label": "Open counterexample card",
-      "selector": "#counterexamples .case-card",
-      "x": 436,
-      "y": 366,
-      "elementFromPoint": "SPAN",
-      "action": "click",
-      "expectedAriaExpanded": "true",
-      "durationMs": 2000,
-      "narration": "A specific held-out case changes outcome.",
-      "scrollY": 3970,
-      "liveValuesVerified": true
-    },
-    {
-      "time": "2:00-2:15",
-      "label": "Read ethics panel",
-      "selector": "#ethics-title",
-      "x": 436,
-      "y": 537,
-      "elementFromPoint": "H2#ethics-title",
-      "action": "wait",
-      "durationMs": 2500,
-      "narration": "Human in the loop is mandatory.",
-      "scrollY": 4392,
-      "liveValuesVerified": true
-    },
-    {
-      "time": "2:15-2:25",
-      "label": "Export audit locally",
-      "selector": "#export-json",
-      "x": 1616,
-      "y": 978,
-      "elementFromPoint": "BUTTON#export-json.button",
-      "action": "click",
-      "durationMs": 1200,
-      "narration": "No data leaves the browser.",
-      "scrollY": 4484,
-      "liveValuesVerified": true
-    }
-  ]
-}
+[
+  { "do": "at", "s": 0.5 },
+  { "do": "scrollTo", "selector": "#hero-title", "offset": 160, "ms": 900 },
+  { "do": "move", "selector": "#hero-title", "ms": 700 },
+
+  { "do": "at", "s": 13.7 },
+  { "do": "scrollTo", "selector": "#lab-title", "offset": 60, "ms": 1500 },
+  { "do": "select", "selector": "#scenario", "value": "clinic" },
+  { "do": "move", "selector": "#scenario", "ms": 500 },
+
+  { "do": "at", "s": 23.3 },
+  { "do": "scrollTo", "selector": "#m-gap", "offset": 180, "ms": 1200 },
+  { "do": "move", "selector": "#m-gap", "ms": 600 },
+
+  { "do": "at", "s": 34.9 },
+  { "do": "scrollTo", "selector": "#loss-canvas", "offset": 140, "ms": 1400 },
+  { "do": "move", "selector": "#loss-canvas", "ms": 700 },
+
+  { "do": "at", "s": 40.3 },
+  { "do": "scrollTo", "selector": "#bias", "offset": 320, "ms": 1400 },
+  { "do": "slide", "selector": "#bias", "to": 0.8, "ms": 2200 },
+
+  { "do": "at", "s": 51.2 },
+  { "do": "scrollTo", "selector": "#m-gap", "offset": 180, "ms": 1200 },
+  { "do": "move", "selector": "#m-gap", "ms": 700 },
+
+  { "do": "at", "s": 63.8 },
+  { "do": "scrollTo", "selector": "#threshold", "offset": 320, "ms": 1300 },
+  { "do": "slide", "selector": "#threshold", "to": 0.3, "ms": 1800 },
+
+  { "do": "at", "s": 71.9 },
+  { "do": "scrollTo", "selector": "#bias", "offset": 320, "ms": 1200 },
+  { "do": "slide", "selector": "#bias", "to": 0.6, "ms": 1800 },
+
+  { "do": "at", "s": 85.2 },
+  { "do": "scrollTo", "selector": "#threshold", "offset": 320, "ms": 1100 },
+  { "do": "slide", "selector": "#threshold", "to": 0.35, "ms": 1500 },
+
+  { "do": "at", "s": 88.9 },
+  { "do": "scrollTo", "selector": "#compare-title", "offset": 60, "ms": 1600 },
+  { "do": "scrollBy", "y": 420, "ms": 1200 },
+  { "do": "move", "selector": "#strategy-rows tr:nth-child(3)", "ms": 700 },
+
+  { "do": "at", "s": 111.3 },
+  { "do": "scrollTo", "selector": "#roc-canvas", "offset": 120, "ms": 1500 },
+  { "do": "move", "selector": "#roc-canvas", "ms": 700 },
+
+  { "do": "at", "s": 127.5 },
+  { "do": "scrollTo", "selector": "#weight-bars", "offset": 180, "ms": 1300 },
+  { "do": "move", "selector": "#weight-bars", "ms": 600 },
+
+  { "do": "at", "s": 136.2 },
+  { "do": "scrollTo", "selector": "#counter-title", "offset": 60, "ms": 1500 },
+
+  { "do": "at", "s": 143.8 },
+  { "do": "move", "selector": "#counterexamples .case-card", "ms": 800 },
+  { "do": "click", "selector": "#counterexamples .case-card" },
+
+  { "do": "at", "s": 152.8 },
+  { "do": "scrollTo", "selector": "#ethics-title", "offset": 80, "ms": 1600 },
+  { "do": "eval", "js": "(() => { const e = document.querySelector('#export-json'); e.scrollIntoView({block:'nearest'}); return true; })()" },
+  { "do": "move", "selector": "#export-json", "ms": 900 },
+
+  { "do": "at", "s": 159.5 },
+  { "do": "scrollTo", "selector": "#hero-title", "offset": 160, "ms": 3000 },
+  { "do": "move", "selector": "#hero-title", "ms": 900 },
+
+  { "do": "at", "s": 170.5 }
+]
