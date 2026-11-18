@@ -1,68 +1,68 @@
 [
+  { "do": "eval", "js": "document.documentElement.style.scrollBehavior = 'auto'; true" },
   { "do": "at", "s": 0.5 },
-  { "do": "scrollTo", "selector": "#hero-title", "offset": 160, "ms": 900 },
+  { "do": "scrollTo", "selector": "#hero-title", "offset": 130, "ms": 900 },
   { "do": "move", "selector": "#hero-title", "ms": 700 },
 
   { "do": "at", "s": 13.7 },
-  { "do": "scrollTo", "selector": "#lab-title", "offset": 60, "ms": 1500 },
+  { "do": "scrollTo", "selector": "#lab-title", "offset": 100, "ms": 1500 },
   { "do": "select", "selector": "#scenario", "value": "clinic" },
   { "do": "move", "selector": "#scenario", "ms": 500 },
 
   { "do": "at", "s": 23.3 },
-  { "do": "scrollTo", "selector": "#m-gap", "offset": 180, "ms": 1200 },
+  { "do": "scrollTo", "selector": "#m-gap", "offset": 300, "ms": 1200 },
   { "do": "move", "selector": "#m-gap", "ms": 600 },
 
   { "do": "at", "s": 34.9 },
-  { "do": "scrollTo", "selector": "#loss-canvas", "offset": 140, "ms": 1400 },
+  { "do": "scrollTo", "selector": "#loss-canvas", "offset": 120, "ms": 1400 },
   { "do": "move", "selector": "#loss-canvas", "ms": 700 },
 
   { "do": "at", "s": 40.3 },
-  { "do": "scrollTo", "selector": "#bias", "offset": 320, "ms": 1400 },
-  { "do": "slide", "selector": "#bias", "to": 0.8, "ms": 2200 },
+  { "do": "scrollTo", "selector": "#bias", "offset": 300, "ms": 1400 },
+  { "do": "slide", "selector": "#bias", "to": 0.8, "ms": 2000 },
 
   { "do": "at", "s": 51.2 },
-  { "do": "scrollTo", "selector": "#m-gap", "offset": 180, "ms": 1200 },
+  { "do": "scrollTo", "selector": "#m-gap", "offset": 300, "ms": 1200 },
   { "do": "move", "selector": "#m-gap", "ms": 700 },
 
   { "do": "at", "s": 63.8 },
-  { "do": "scrollTo", "selector": "#threshold", "offset": 320, "ms": 1300 },
+  { "do": "scrollTo", "selector": "#threshold", "offset": 300, "ms": 1300 },
   { "do": "slide", "selector": "#threshold", "to": 0.3, "ms": 1800 },
 
   { "do": "at", "s": 71.9 },
-  { "do": "scrollTo", "selector": "#bias", "offset": 320, "ms": 1200 },
+  { "do": "scrollTo", "selector": "#bias", "offset": 300, "ms": 1200 },
   { "do": "slide", "selector": "#bias", "to": 0.6, "ms": 1800 },
 
   { "do": "at", "s": 85.2 },
-  { "do": "scrollTo", "selector": "#threshold", "offset": 320, "ms": 1100 },
-  { "do": "slide", "selector": "#threshold", "to": 0.35, "ms": 1500 },
+  { "do": "scrollTo", "selector": "#threshold", "offset": 300, "ms": 1100 },
+  { "do": "slide", "selector": "#threshold", "to": 0.35, "ms": 1400 },
 
   { "do": "at", "s": 88.9 },
-  { "do": "scrollTo", "selector": "#compare-title", "offset": 60, "ms": 1600 },
-  { "do": "scrollBy", "y": 420, "ms": 1200 },
+  { "do": "scrollTo", "selector": "#strategy-rows", "offset": 110, "ms": 1500 },
   { "do": "move", "selector": "#strategy-rows tr:nth-child(3)", "ms": 700 },
 
   { "do": "at", "s": 111.3 },
-  { "do": "scrollTo", "selector": "#roc-canvas", "offset": 120, "ms": 1500 },
+  { "do": "scrollTo", "selector": "#roc-canvas", "offset": 110, "ms": 1500 },
   { "do": "move", "selector": "#roc-canvas", "ms": 700 },
 
   { "do": "at", "s": 127.5 },
-  { "do": "scrollTo", "selector": "#weight-bars", "offset": 180, "ms": 1300 },
+  { "do": "scrollTo", "selector": "#weight-bars", "offset": 140, "ms": 1300 },
   { "do": "move", "selector": "#weight-bars", "ms": 600 },
 
   { "do": "at", "s": 136.2 },
-  { "do": "scrollTo", "selector": "#counter-title", "offset": 60, "ms": 1500 },
+  { "do": "scrollTo", "selector": "#counter-title", "offset": 110, "ms": 1500 },
 
   { "do": "at", "s": 143.8 },
   { "do": "move", "selector": "#counterexamples .case-card", "ms": 800 },
   { "do": "click", "selector": "#counterexamples .case-card" },
 
   { "do": "at", "s": 152.8 },
-  { "do": "scrollTo", "selector": "#ethics-title", "offset": 80, "ms": 1600 },
-  { "do": "eval", "js": "(() => { const e = document.querySelector('#export-json'); e.scrollIntoView({block:'nearest'}); return true; })()" },
+  { "do": "scrollTo", "selector": "#ethics-title", "offset": 120, "ms": 1600 },
+  { "do": "scrollTo", "selector": "#export-json", "offset": 820, "ms": 900 },
   { "do": "move", "selector": "#export-json", "ms": 900 },
 
   { "do": "at", "s": 159.5 },
-  { "do": "scrollTo", "selector": "#hero-title", "offset": 160, "ms": 3000 },
+  { "do": "scrollTo", "selector": "#hero-title", "offset": 130, "ms": 3000 },
   { "do": "move", "selector": "#hero-title", "ms": 900 },
 
   { "do": "at", "s": 170.5 }
