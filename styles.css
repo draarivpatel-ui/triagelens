@@ -17,7 +17,6 @@
   --gold: #9a7116;
   --gold-soft: #f7efd9;
   --blue: #2c5a86;
-  --blue-soft: #e5edf5;
   --focus: #0b5cc9;
   --shadow: 0 14px 38px rgba(22, 33, 44, 0.07);
   --radius: 14px;
@@ -44,7 +43,6 @@ html[data-theme='dark'] {
   --gold: #e8c46e;
   --gold-soft: #37301c;
   --blue: #8bbbe8;
-  --blue-soft: #1d3245;
   --focus: #85bcff;
   --shadow: 0 14px 38px rgba(0, 0, 0, 0.3);
 }
