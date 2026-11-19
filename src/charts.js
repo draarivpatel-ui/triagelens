@@ -151,7 +151,6 @@ export function drawReliability(canvas, bins) {
   ctx.setLineDash([]);
 
   if (!bins || !bins.length) return;
-  const bw = pw / bins.length;
   bins.forEach((b) => {
     if (!b.n) return;
     const px = m.l + b.confidence * pw;
