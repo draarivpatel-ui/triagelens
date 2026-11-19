@@ -1,5 +1,7 @@
 # TriageLens
 
+**Live auditor:** [https://aariv.me/triagelens/](https://aariv.me/triagelens/)
+
 **An interactive, zero-dependency, 100% browser-local ML classifier, calibration and algorithmic fairness auditor.**
 
 Built for the Teens in AI Global Challenge 2027 (Ages 13+, entries close 15 February 2027). TriageLens trains two real classifiers in the browser, calibrates their probabilities, and shows the exact mathematical trade-off between overall recall and subgroup fairness. All data is **synthetic** and generated inside the page. There are no real patient, student, or shelter records, no pilots, no analytics, no CDN, and no network requests.
