@@ -1,0 +1,152 @@
+{
+  "title": "TriageLens demo choreography",
+  "viewport": { "width": 1920, "height": 1080 },
+  "browser": "headless Chrome (--headless=new --mute-audio), isolated throwaway profile",
+  "verification": {
+    "method": "Each coordinate was checked with document.elementFromPoint at 1920x1080 against its target selector. Every step is in the viewport and hits the intended element.",
+    "consoleErrors": 0,
+    "externalRequests": 0,
+    "horizontalOverflowAt390px": false,
+    "mobileScrollWidth": 390,
+    "mobileClientWidth": 390
+  },
+  "steps": [
+    {
+      "time": "0:00-0:15",
+      "label": "Hero and local-only claim",
+      "selector": "#hero-title",
+      "x": 690,
+      "y": 320,
+      "elementFromPoint": "H1#hero-title",
+      "action": "wait",
+      "durationMs": 1500,
+      "narration": "Intro: who does the model miss?"
+    },
+    {
+      "time": "0:15-0:25",
+      "label": "Select clinic benchmark",
+      "selector": "#scenario",
+      "x": 471,
+      "y": 540,
+      "elementFromPoint": "SELECT#scenario",
+      "action": "select",
+      "value": "clinic",
+      "durationMs": 600,
+      "narration": "Synthetic clinic scenario."
+    },
+    {
+      "time": "0:25-0:40",
+      "label": "Inspect live gap card",
+      "selector": "#m-gap",
+      "x": 1448,
+      "y": 540,
+      "elementFromPoint": "STRONG#m-gap",
+      "action": "wait",
+      "durationMs": 1200,
+      "narration": "Two real models train locally."
+    },
+    {
+      "time": "0:40-0:55",
+      "label": "Raise label bias",
+      "selector": "#bias",
+      "x": 799,
+      "y": 540,
+      "elementFromPoint": "INPUT#bias",
+      "action": "range",
+      "value": "0.8",
+      "durationMs": 1200,
+      "narration": "Under-triage gap opens."
+    },
+    {
+      "time": "0:55-1:05",
+      "label": "Adjust decision threshold",
+      "selector": "#threshold",
+      "x": 1125,
+      "y": 540,
+      "elementFromPoint": "INPUT#threshold",
+      "action": "range",
+      "value": "0.3",
+      "durationMs": 800,
+      "narration": "Global threshold controls recall."
+    },
+    {
+      "time": "1:05-1:10",
+      "label": "Restore audited settings",
+      "selector": "#bias",
+      "x": 799,
+      "y": 540,
+      "elementFromPoint": "INPUT#bias",
+      "action": "range",
+      "value": "0.6",
+      "durationMs": 500,
+      "narration": "Back to benchmark defaults."
+    },
+    {
+      "time": "1:10-1:25",
+      "label": "Inspect strategy trade-off table",
+      "selector": "#strategy-rows tr:nth-child(3)",
+      "x": 960,
+      "y": 540,
+      "elementFromPoint": "TD",
+      "action": "wait",
+      "durationMs": 2500,
+      "narration": "Equal opportunity cuts the gap."
+    },
+    {
+      "time": "1:25-1:35",
+      "label": "Inspect ROC chart",
+      "selector": "#roc-canvas",
+      "x": 634,
+      "y": 540,
+      "elementFromPoint": "CANVAS#roc-canvas",
+      "action": "wait",
+      "durationMs": 1200,
+      "narration": "Live held-out ROC curve."
+    },
+    {
+      "time": "1:35-1:45",
+      "label": "Inspect feature weights",
+      "selector": "#weight-bars .weight-row:nth-child(3)",
+      "x": 633,
+      "y": 540,
+      "elementFromPoint": "SPAN",
+      "action": "wait",
+      "durationMs": 1200,
+      "narration": "Interpretable coefficients."
+    },
+    {
+      "time": "1:45-1:55",
+      "label": "Open counterexample card",
+      "selector": "#counterexamples .case-card",
+      "x": 471,
+      "y": 540,
+      "elementFromPoint": "P",
+      "action": "click",
+      "expectedAriaExpanded": "true",
+      "durationMs": 2000,
+      "narration": "A specific held-out case changes outcome."
+    },
+    {
+      "time": "1:55-2:10",
+      "label": "Read ethics panel",
+      "selector": "#ethics-title",
+      "x": 684,
+      "y": 540,
+      "elementFromPoint": "H2#ethics-title",
+      "action": "wait",
+      "durationMs": 2500,
+      "narration": "Human in the loop is mandatory."
+    },
+    {
+      "time": "2:10-2:20",
+      "label": "Export audit locally",
+      "selector": "#export-json",
+      "x": 1616,
+      "y": 978,
+      "elementFromPoint": "BUTTON#export-json",
+      "action": "click",
+      "durationMs": 1200,
+      "narration": "No data leaves the browser."
+    }
+  ]
+}
