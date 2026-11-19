@@ -1,5 +1,5 @@
 /* TriageLens UI controller. ES module, zero dependencies, no network access. */
-import { runAudit, exportAudit, SCENARIOS } from './ml-engine.js';
+import { runAudit, exportAudit, SCENARIOS, formatGapChange, tradeoffNotes } from './ml-engine.js';
 import { drawRoc, drawReliability, drawDisparity, drawLoss } from './charts.js';
 
 const $ = (id) => document.getElementById(id);
@@ -61,9 +61,15 @@ function renderMetrics(audit) {
   $('m-brier-foot').textContent = 'raw ' + num(audit.calibration.testRawBrier) + ' → calibrated';
   $('m-gap').textContent = pct(b.groups.equalOpportunityGap) + ' → ' + pct(eo.metrics.groups.equalOpportunityGap);
   const drop = b.groups.equalOpportunityGap - eo.metrics.groups.equalOpportunityGap;
-  $('m-gap-foot').textContent = drop > 0.0005
-    ? 'reduced by ' + pct(drop) + ' with equal opportunity'
-    : 'no gap at this setting';
+  $('m-gap-foot').textContent = formatGapChange(drop, eo.metrics.groups.equalOpportunityGap) + ' with equal opportunity';
+  const dropPct = (from, to) => ((to - from) * 100).toFixed(1);
+  const notes = tradeoffNotes(audit).map((n) => n.label + ': ' + n.changes.join(', '));
+  $('recall-banner').textContent = notes.length
+    ? 'Trade-off watch: ' + notes.join('; ') + '. Recall change vs global threshold: ' +
+      'equal opportunity ' + dropPct(b.recall, eo.metrics.recall) + ' pp, selection ' +
+      dropPct(b.recall, audit.strategies.find((s) => s.id === 'equal-selection').metrics.recall) + ' pp, proxy removal ' +
+      dropPct(b.recall, audit.strategies.find((s) => s.id === 'proxy-removal').metrics.recall) + ' pp.'
+    : 'Trade-off watch: no mitigation changes overall recall or widens a secondary gap at this setting.';
 }
 
 function renderStrategies(audit) {
@@ -112,8 +118,9 @@ function renderStrategies(audit) {
   const gapDrop = base.groups.equalOpportunityGap - eo.groups.equalOpportunityGap;
   $('tradeoff-note').textContent =
     'Equal opportunity changes the EO gap from ' + pct(base.groups.equalOpportunityGap) + ' to ' +
-    pct(eo.groups.equalOpportunityGap) + ' (a ' + pct(gapDrop) + ' reduction) for an accuracy change of ' +
-    (accuracyCost >= 0 ? '-' : '+') + pct(Math.abs(accuracyCost)) + '. Group-aware thresholds are fitted on the training split only.';
+    pct(eo.groups.equalOpportunityGap) + ' (' + formatGapChange(gapDrop, eo.groups.equalOpportunityGap) +
+    ') for an accuracy change of ' + (accuracyCost >= 0 ? '-' : '+') + pct(Math.abs(accuracyCost)) +
+    '. Recall changes and any widening secondary gaps are listed in the trade-off banner above.';
 }
 
 function renderWeights(audit) {
@@ -190,7 +197,11 @@ function renderMiniStats(audit, wallMs) {
 
 function renderCounterexamples(audit) {
   const wrap = $('counterexamples');
+  const countEl = $('counterexample-count');
   wrap.replaceChildren();
+  countEl.textContent = audit.counterexamples.length > 9
+    ? 'Showing 9 of ' + audit.counterexamples.length + ' counterexamples'
+    : '';
   if (!audit.counterexamples.length) {
     const p = document.createElement('p');
     p.className = 'empty-state';

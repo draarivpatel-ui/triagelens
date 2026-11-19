@@ -13,6 +13,10 @@ import {
   fitCalibration,
   optimizeGroupThresholds,
   optimizeSelectionThresholds,
+  selectionTargetFromTrain,
+  fitGroupThresholds,
+  formatGapChange,
+  tradeoffNotes,
   runAudit,
   exportAudit
 } from '../src/ml-engine.js';
@@ -440,5 +444,141 @@ test('all audit values are finite JSON serializable numbers', () => {
     assert.ok(text.length > 1000);
     assert.ok(!text.includes('NaN'));
     assert.ok(!text.includes('Infinity'));
+  }
+});
+
+/* ------------------------------------------------------------------ */
+/* Leakage, threshold space, calibration and gap-format regressions      */
+/* ------------------------------------------------------------------ */
+
+test('selection-rate target is computed from train rows only', () => {
+  const d = generateDataset({ scenarioId: 'clinic', seed: 4242, bias: 0.6, n: 1400 });
+  const keys = ['symptomSeverity', 'waitDays', 'hasProvider', 'ageYears', 'incomeIndex'];
+  const model = trainLogisticRegression(d.train, { featureKeys: keys, epochs: 400 });
+  const cal = fitCalibration(d.train.map((r) => model.predictProba(r)), d.train.map((r) => r.y));
+  const trainScores = d.train.map((r) => cal.apply(model.predictProba(r)));
+  const { target, rates } = selectionTargetFromTrain(d.train, trainScores, 0.35, 'rural');
+  assert.ok(Math.abs(target - (rates[0] + rates[1]) / 2) < 1e-12);
+  for (const g of [0, 1]) {
+    const idx = d.train.map((r, i) => ({ r, i })).filter(({ r }) => r.rural === g);
+    const selected = idx.filter(({ i }) => trainScores[i] >= 0.35).length;
+    assert.ok(Math.abs(rates[g] - selected / idx.length) < 1e-12);
+  }
+  // A poisoned held-out split cannot reach the train-only target computation.
+  d.test.forEach((r) => { r.y = 1 - r.y; });
+  assert.equal(selectionTargetFromTrain(d.train, trainScores, 0.35, 'rural').target, target);
+});
+
+test('mutating held-out labels and rows changes no fitted threshold or target', () => {
+  const opts = { scenarioId: 'clinic', seed: 12345, bias: 0.6, threshold: 0.35, n: 1400 };
+  const base = runAudit(opts);
+  const keys = ['symptomSeverity', 'waitDays', 'hasProvider', 'ageYears', 'incomeIndex'];
+  const d = generateDataset({ scenarioId: 'clinic', seed: 12345, bias: 0.6, n: 1400 });
+  const model = trainLogisticRegression(d.train, { featureKeys: keys, epochs: 400 });
+  const cal = fitCalibration(d.train.map((r) => model.predictProba(r)), d.train.map((r) => r.y));
+  const trainScores = d.train.map((r) => cal.apply(model.predictProba(r)));
+  const cleanTarget = selectionTargetFromTrain(d.train, trainScores, 0.35, 'rural').target;
+  const cleanEo = fitGroupThresholds(d.train, trainScores, { subgroupKey: 'rural', referenceThreshold: 0.35 });
+  const cleanSel = optimizeSelectionThresholds(d.train, trainScores, { subgroupKey: 'rural', target: cleanTarget });
+
+  // Poison every held-out label and feature, then refit from the same seed.
+  d.test.forEach((r, i) => { r.y = 1 - r.y; r.symptomSeverity += 1000 * (i + 1); });
+  assert.equal(selectionTargetFromTrain(d.train, trainScores, 0.35, 'rural').target, cleanTarget);
+  assert.deepEqual(fitGroupThresholds(d.train, trainScores, { subgroupKey: 'rural', referenceThreshold: 0.35 }), cleanEo);
+  assert.deepEqual(optimizeSelectionThresholds(d.train, trainScores, { subgroupKey: 'rural', target: cleanTarget }), cleanSel);
+
+  const again = runAudit(opts);
+  assert.deepEqual(again.strategies.find((s) => s.id === 'equal-opportunity').thresholds,
+    base.strategies.find((s) => s.id === 'equal-opportunity').thresholds);
+  assert.deepEqual(again.strategies.find((s) => s.id === 'equal-selection').thresholds,
+    base.strategies.find((s) => s.id === 'equal-selection').thresholds);
+  assert.equal(again.fitting.selectionTarget, base.fitting.selectionTarget);
+  assert.equal(again.fitting.eoGoalTpr, base.fitting.eoGoalTpr);
+});
+
+test('EO thresholds are fitted in calibrated train space, not raw train space', () => {
+  const opts = { scenarioId: 'clinic', seed: 20270101, bias: 0.6, threshold: 0.35, n: 1400 };
+  const audit = runAudit(opts);
+  const keys = audit.featureKeys;
+  const d = generateDataset({ scenarioId: 'clinic', seed: opts.seed, bias: opts.bias, n: opts.n });
+  const model = trainLogisticRegression(d.train, { featureKeys: keys, l2: 0.02, epochs: 400 });
+  const cal = fitCalibration(d.train.map((r) => model.predictProba(r)), d.train.map((r) => r.y));
+  const raw = d.train.map((r) => model.predictProba(r));
+  const calibrated = raw.map(cal.apply);
+  const fitted = fitGroupThresholds(d.train, calibrated, {
+    subgroupKey: 'rural', referenceThreshold: 0.35
+  }).thresholds;
+  const rawFit = fitGroupThresholds(d.train, raw, {
+    subgroupKey: 'rural', referenceThreshold: 0.35
+  }).thresholds;
+  const live = audit.strategies.find((s) => s.id === 'equal-opportunity').thresholds;
+  assert.deepEqual(Object.keys(live).sort(), Object.keys(fitted).sort());
+  for (const g of Object.keys(fitted)) {
+    assert.ok(Math.abs(live[g] - fitted[g]) < 1e-12,
+      'group ' + g + ' must use calibrated train thresholds');
+  }
+  // Guard: the raw-space fit is a different computation for at least one group.
+  assert.ok(Object.keys(rawFit).some((g) => Math.abs(rawFit[g] - fitted[g]) > 1e-9));
+});
+
+test('proxy removal uses its own train-only calibration', () => {
+  const opts = { scenarioId: 'scholarship', seed: 20270101, bias: 0.6, threshold: 0.35, n: 1400 };
+  const audit = runAudit(opts);
+  const calNoProxy = audit.calibration.noProxy;
+  assert.ok(calNoProxy && Number.isFinite(calNoProxy.a) && Number.isFinite(calNoProxy.b));
+  assert.ok(calNoProxy.trainBrier >= 0 && calNoProxy.calibratedBrier >= 0);
+  assert.ok(calNoProxy.trainEce >= 0 && calNoProxy.calibratedEce >= 0);
+  // When the full and no-proxy models differ, their calibration params differ too.
+  assert.ok(
+    Math.abs(audit.calibration.a - calNoProxy.a) > 1e-9 ||
+    Math.abs(audit.calibration.b - calNoProxy.b) > 1e-9,
+    'no-proxy fit must not simply borrow the full model calibration'
+  );
+  for (const id of scenarioIds) {
+    const a = runAudit({ scenarioId: id, seed: opts.seed, bias: opts.bias, threshold: opts.threshold, n: opts.n });
+    assert.ok(a.calibration.noProxy.temperature > 0 && a.calibration.noProxy.temperature <= 20, id);
+  }
+});
+
+test('EO leveling maintains overall recall near or above the global baseline', () => {
+  for (const id of scenarioIds) {
+    const a = runAudit({ scenarioId: id, seed: 20270101, bias: 0.6, threshold: 0.35, n: 1400 });
+    const base = a.baseline.metrics;
+    const eo = a.strategies.find((s) => s.id === 'equal-opportunity').metrics;
+    assert.ok(eo.recall >= base.recall - 0.005,
+      id + ' EO recall ' + eo.recall.toFixed(3) + ' must not level down from ' + base.recall.toFixed(3));
+  }
+});
+
+test('formatGapChange handles worsening, unchanged, zero and improving gaps', () => {
+  assert.match(formatGapChange(-0.052, 0.12), /gap increased by 5\.2 percentage points/);
+  assert.match(formatGapChange(-0.052, 0.12), /increased/);
+  assert.doesNotMatch(formatGapChange(-0.052, 0.12), /reduced|no gap/);
+  assert.match(formatGapChange(0, 0), /no gap \(0\.0%\)/);
+  assert.match(formatGapChange(0.0001, 0.032), /gap unchanged \(3\.2%\)/);
+  assert.doesNotMatch(formatGapChange(0.0001, 0.032), /no gap|reduced/);
+  assert.match(formatGapChange(0.184, 0.061), /reduced by 18\.4 percentage points/);
+  for (const text of [
+    formatGapChange(-0.052, 0.12), formatGapChange(0, 0),
+    formatGapChange(0.0001, 0.032), formatGapChange(0.184, 0.061)
+  ]) {
+    assert.ok(!text.includes('-%') && !text.includes('negative'), text);
+  }
+});
+
+test('gap UI never reports no gap when the actual gap is positive at clinic seed 12345', () => {
+  const a = runAudit({ scenarioId: 'clinic', seed: 12345, bias: 0.6, threshold: 0.35 });
+  const base = a.baseline.metrics;
+  const eo = a.strategies.find((s) => s.id === 'equal-opportunity').metrics;
+  const gapDrop = base.groups.equalOpportunityGap - eo.groups.equalOpportunityGap;
+  const text = formatGapChange(gapDrop, eo.groups.equalOpportunityGap) + ' with equal opportunity';
+  assert.ok(eo.groups.equalOpportunityGap > 0);
+  assert.ok(text.includes('reduced by '), text);
+  assert.ok(!text.includes('no gap at this setting'), text);
+  assert.ok(!text.includes("-%"), text);
+  // Trade-off banner must name any secondary gap widening explicitly.
+  const notes = tradeoffNotes(a);
+  for (const n of notes) {
+    for (const c of n.changes) assert.ok(c.includes('pp'));
   }
 });

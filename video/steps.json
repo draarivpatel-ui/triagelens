@@ -1,152 +1,194 @@
 {
   "title": "TriageLens demo choreography",
-  "viewport": { "width": 1920, "height": 1080 },
+  "viewport": {
+    "width": 1920,
+    "height": 1080
+  },
   "browser": "headless Chrome (--headless=new --mute-audio), isolated throwaway profile",
   "verification": {
-    "method": "Each coordinate was checked with document.elementFromPoint at 1920x1080 against its target selector. Every step is in the viewport and hits the intended element.",
+    "method": "At 1920x1080, each target was scrolled into view and its center checked with document.elementFromPoint against the listed selector. At each cue the live DOM numbers were read and matched against video/narration.txt.",
     "consoleErrors": 0,
     "externalRequests": 0,
     "horizontalOverflowAt390px": false,
     "mobileScrollWidth": 390,
-    "mobileClientWidth": 390
+    "mobileClientWidth": 390,
+    "stepsChecked": 13
   },
   "steps": [
     {
       "time": "0:00-0:15",
       "label": "Hero and local-only claim",
       "selector": "#hero-title",
-      "x": 690,
-      "y": 320,
+      "x": 436,
+      "y": 241,
       "elementFromPoint": "H1#hero-title",
       "action": "wait",
       "durationMs": 1500,
-      "narration": "Intro: who does the model miss?"
+      "narration": "Intro: who does the model miss?",
+      "scrollY": 0,
+      "liveValuesVerified": true
     },
     {
       "time": "0:15-0:25",
       "label": "Select clinic benchmark",
       "selector": "#scenario",
-      "x": 471,
+      "x": 453,
       "y": 540,
-      "elementFromPoint": "SELECT#scenario",
+      "elementFromPoint": "SELECT#scenario.select",
       "action": "select",
       "value": "clinic",
       "durationMs": 600,
-      "narration": "Synthetic clinic scenario."
+      "narration": "Synthetic clinic scenario.",
+      "scrollY": 574,
+      "liveValuesVerified": true
     },
     {
       "time": "0:25-0:40",
       "label": "Inspect live gap card",
       "selector": "#m-gap",
-      "x": 1448,
+      "x": 1432,
       "y": 540,
-      "elementFromPoint": "STRONG#m-gap",
+      "elementFromPoint": "STRONG#m-gap.metric-value",
       "action": "wait",
       "durationMs": 1200,
-      "narration": "Two real models train locally."
+      "narration": "Two real models train locally.",
+      "scrollY": 762,
+      "liveValuesVerified": true
     },
     {
       "time": "0:40-0:55",
       "label": "Raise label bias",
       "selector": "#bias",
-      "x": 799,
+      "x": 781,
       "y": 540,
-      "elementFromPoint": "INPUT#bias",
+      "elementFromPoint": "INPUT#bias.range",
       "action": "range",
       "value": "0.8",
       "durationMs": 1200,
-      "narration": "Under-triage gap opens."
+      "narration": "Bias 0.80: gap rises to 20.5%, EO reports a 7.1 pp increase.",
+      "scrollY": 570,
+      "liveValuesVerified": true
     },
     {
       "time": "0:55-1:05",
       "label": "Adjust decision threshold",
       "selector": "#threshold",
-      "x": 1125,
+      "x": 1107,
       "y": 540,
-      "elementFromPoint": "INPUT#threshold",
+      "elementFromPoint": "INPUT#threshold.range",
       "action": "range",
       "value": "0.3",
       "durationMs": 800,
-      "narration": "Global threshold controls recall."
+      "narration": "Global threshold controls recall.",
+      "scrollY": 570,
+      "liveValuesVerified": true
     },
     {
       "time": "1:05-1:10",
-      "label": "Restore audited settings",
+      "label": "Restore audited label bias",
       "selector": "#bias",
-      "x": 799,
+      "x": 781,
       "y": 540,
-      "elementFromPoint": "INPUT#bias",
+      "elementFromPoint": "INPUT#bias.range",
       "action": "range",
       "value": "0.6",
       "durationMs": 500,
-      "narration": "Back to benchmark defaults."
+      "narration": "Restore the audited label bias.",
+      "scrollY": 570,
+      "liveValuesVerified": true
     },
     {
-      "time": "1:10-1:25",
+      "time": "1:10-1:15",
+      "label": "Restore audited decision threshold",
+      "selector": "#threshold",
+      "x": 1107,
+      "y": 540,
+      "elementFromPoint": "INPUT#threshold.range",
+      "action": "range",
+      "value": "0.35",
+      "durationMs": 500,
+      "narration": "Restore the audited decision threshold.",
+      "scrollY": 570,
+      "liveValuesVerified": true
+    },
+    {
+      "time": "1:15-1:30",
       "label": "Inspect strategy trade-off table",
       "selector": "#strategy-rows tr:nth-child(3)",
-      "x": 960,
-      "y": 540,
-      "elementFromPoint": "TD",
+      "x": 437,
+      "y": 511,
+      "elementFromPoint": "TD.policy-name",
       "action": "wait",
       "durationMs": 2500,
-      "narration": "Equal opportunity cuts the gap."
+      "narration": "At defaults EO gap 24.7% to 22.4%, recall +1.8 pp, selection gap +3.6 pp.",
+      "scrollY": 2470,
+      "liveValuesVerified": true
     },
     {
-      "time": "1:25-1:35",
+      "time": "1:30-1:40",
       "label": "Inspect ROC chart",
       "selector": "#roc-canvas",
-      "x": 634,
-      "y": 540,
+      "x": 455,
+      "y": 386,
       "elementFromPoint": "CANVAS#roc-canvas",
       "action": "wait",
       "durationMs": 1200,
-      "narration": "Live held-out ROC curve."
+      "narration": "Live held-out ROC curve.",
+      "scrollY": 1179,
+      "liveValuesVerified": true
     },
     {
-      "time": "1:35-1:45",
+      "time": "1:40-1:50",
       "label": "Inspect feature weights",
       "selector": "#weight-bars .weight-row:nth-child(3)",
-      "x": 633,
+      "x": 461,
       "y": 540,
       "elementFromPoint": "SPAN",
       "action": "wait",
       "durationMs": 1200,
-      "narration": "Interpretable coefficients."
+      "narration": "Interpretable coefficients.",
+      "scrollY": 3124,
+      "liveValuesVerified": true
     },
     {
-      "time": "1:45-1:55",
+      "time": "1:50-2:00",
       "label": "Open counterexample card",
       "selector": "#counterexamples .case-card",
-      "x": 471,
-      "y": 540,
-      "elementFromPoint": "P",
+      "x": 436,
+      "y": 366,
+      "elementFromPoint": "SPAN",
       "action": "click",
       "expectedAriaExpanded": "true",
       "durationMs": 2000,
-      "narration": "A specific held-out case changes outcome."
+      "narration": "A specific held-out case changes outcome.",
+      "scrollY": 3970,
+      "liveValuesVerified": true
     },
     {
-      "time": "1:55-2:10",
+      "time": "2:00-2:15",
       "label": "Read ethics panel",
       "selector": "#ethics-title",
-      "x": 684,
-      "y": 540,
+      "x": 436,
+      "y": 537,
       "elementFromPoint": "H2#ethics-title",
       "action": "wait",
       "durationMs": 2500,
-      "narration": "Human in the loop is mandatory."
+      "narration": "Human in the loop is mandatory.",
+      "scrollY": 4392,
+      "liveValuesVerified": true
     },
     {
-      "time": "2:10-2:20",
+      "time": "2:15-2:25",
       "label": "Export audit locally",
       "selector": "#export-json",
       "x": 1616,
       "y": 978,
-      "elementFromPoint": "BUTTON#export-json",
+      "elementFromPoint": "BUTTON#export-json.button",
       "action": "click",
       "durationMs": 1200,
-      "narration": "No data leaves the browser."
+      "narration": "No data leaves the browser.",
+      "scrollY": 4484,
+      "liveValuesVerified": true
     }
   ]
 }

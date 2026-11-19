@@ -38,8 +38,8 @@
         <h1 id="hero-title">See who the model <em>misses.</em></h1>
         <p class="hero-lead">
           Train two real classifiers in your browser, calibrate their probabilities, and watch the exact
-          accuracy-versus-fairness trade-off of three mitigation strategies. Every row is a
-          <strong>synthetic benchmark</strong>. No data leaves this page.
+          accuracy-versus-fairness trade-off of four mitigation policies against an uncalibrated baseline.
+          Every row is a <strong>synthetic benchmark</strong>. No data leaves this page.
         </p>
         <div class="hero-actions">
           <a class="button primary" href="#lab">Open the audit lab <span aria-hidden="true">↘</span></a>
@@ -147,6 +147,8 @@
         </div>
       </div>
 
+      <p class="tradeoff-banner" id="recall-banner" role="status" aria-live="polite">--</p>
+
       <!-- Charts -->
       <div class="charts-grid">
         <figure class="chart-card">
@@ -178,7 +180,7 @@
       <div class="section-head">
         <div>
           <p class="eyebrow">The mathematical trade-off</p>
-          <h2 id="compare-title">Four policies, one held-out set.</h2>
+          <h2 id="compare-title">Four mitigation policies plus an uncalibrated baseline, one held-out set.</h2>
         </div>
         <p class="section-intro">
           Each row is a complete decision policy applied to the same synthetic held-out rows. Fairness gaps
@@ -237,6 +239,7 @@
           mitigation recovers them. Click a card for the full feature vector.
         </p>
       </div>
+      <p class="counterexample-count" id="counterexample-count" role="status"></p>
       <div id="counterexamples" class="case-grid" aria-live="polite"></div>
     </section>
 
@@ -274,9 +277,12 @@
         <p><strong>Data statement.</strong> All 1,400 rows per run are generated in your browser from a seeded
           pseudo-random generator. There is no patient data, no student records, no shelter guest data, and no
           real-world pilot. This project has not been deployed in any clinic, school, or shelter.</p>
-        <p><strong>Limits.</strong> Equalized odds trades some overall accuracy for equal opportunity.
-          Removing a proxy does not remove bias from every other correlated feature. Calibration is fitted
-          only on training rows and reported on held-out rows. Small subgroups make any error rate noisy.</p>
+        <p><strong>Limits.</strong> Equal opportunity lifts underserved-group true positives toward the
+          better training operating point, but it can change overall recall and widen a secondary gap such as
+          selection rate. Every mitigation's recall and secondary-gap changes are shown in the trade-off
+          banner, so no cost is hidden. Removing a proxy does not remove bias from every other correlated
+          feature. Calibration is fitted only on training rows and reported on held-out rows. Small subgroups
+          make any error rate noisy.</p>
       </div>
     </section>
   </main>

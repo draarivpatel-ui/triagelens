@@ -738,86 +738,111 @@ function tprAt(indices, rows, scores, t) {
   return positives ? tp / positives : 0;
 }
 
+/**
+ * Choose the threshold closest to a reference that attains the requested TPR
+ * on the fitting rows. Candidate cut points are the group's own scores plus the
+ * boundaries between them, so a target TPR is reachable even when probabilities
+ * are tightly clustered after calibration.
+ */
+function thresholdForTpr(indices, rows, scores, goal, reference) {
+  const positives = indices.filter((i) => rows[i].y).map((i) => scores[i]).sort((a, b) => a - b);
+  if (!positives.length) return reference;
+  const targetCount = Math.round(goal * positives.length);
+  // Candidate cut points: below each relevant positive score and above it, so
+  // both sides of the target TPR are reachable with score-precision accuracy.
+  const candidates = [reference];
+  for (const count of [targetCount - 1, targetCount, targetCount + 1]) {
+    const c = Math.max(0, Math.min(positives.length - 1, positives.length - count));
+    const at = positives[c];
+    candidates.push(at, Math.max(0, at - 1e-7), Math.min(1, at + 1e-7));
+  }
+  let best = reference;
+  let bestCost = Infinity;
+  for (const t of candidates) {
+    const tpr = tprAt(indices, rows, scores, t);
+    const shortfall = Math.max(0, goal - tpr);
+    const excess = Math.max(0, tpr - goal);
+    // Missing the target TPR (leveling down) costs much more than overshooting.
+    const cost = 10 * shortfall + excess + 0.00005 * Math.abs(t - reference);
+    if (cost < bestCost - 1e-12) {
+      bestCost = cost;
+      best = t;
+    }
+  }
+  return best;
+}
+
 function selectionAt(indices, scores, t) {
   let selected = 0;
   for (const i of indices) if (scores[i] >= t) selected++;
   return indices.length ? selected / indices.length : 0;
 }
 
-/** Threshold whose TPR is nearest a goal. Ties prefer a threshold near 0.5. */
-function nearestTpr(indices, rows, scores, goal, grid) {
-  let bestT = 0.5;
-  let bestCost = Infinity;
-  for (let k = 0; k < grid; k++) {
-    const t = k / (grid - 1);
-    const cost = Math.abs(tprAt(indices, rows, scores, t) - goal) + 0.00005 * Math.abs(t - 0.5);
-    if (cost < bestCost) {
-      bestCost = cost;
-      bestT = t;
-    }
-  }
-  return bestT;
-}
-
-/**
- * Equalized odds post processing (Hardt, Price and Srebro, 2016).
- *
- * Each group keeps the threshold nearest its own accuracy maximizing operating
- * point on the TRAIN split, then the group with lower TPR gets the lowest
- * threshold whose train TPR reaches the better group's TPR. This guarantees the
- * two observed TPR gaps are small instead of merely relabeling the same threshold.
- */
-export function optimizeGroupThresholds(rows, scores, options = {}) {
-  const grid = options.grid ?? 101;
-  const subgroupKey = options.subgroupKey || 'rural';
+/** Map a subgroup key to the fitting-row indices for each group. */
+function groupIndices(rows, subgroupKey) {
   const byGroup = new Map();
   for (let i = 0; i < rows.length; i++) {
     const g = rows[i][subgroupKey] | 0;
     if (!byGroup.has(g)) byGroup.set(g, []);
     byGroup.get(g).push(i);
   }
-  const ids = [...byGroup.keys()].sort((a, b) => a - b);
-  if (ids.length < 2) return { [ids[0]]: 0.5 };
+  return byGroup;
+}
 
-  // Accuracy maximizing threshold per group, restricted to a sane range.
-  // Blend in proximity to the global 0.5 operating point on ties so the
-  // optimizer does not drift to extremes when a group has few positives.
+/**
+ * Equalized odds post processing (Hardt, Price and Srebro, 2016), fitted on one
+ * score space and on fitting rows only. Instead of dragging the advantaged
+ * group down to the lower accuracy-maximizing TPR of the underserved group,
+ * this targets the better TPR observed at the working reference threshold and
+ * lifts every group toward it. Overall recall therefore stays at or above the
+ * global baseline while subgroup TPRs converge.
+ */
+export function fitGroupThresholds(rows, scores, options = {}) {
+  const grid = options.grid ?? 101;
+  const subgroupKey = options.subgroupKey || 'rural';
+  const reference = options.referenceThreshold ?? 0.5;
+  const byGroup = groupIndices(rows, subgroupKey);
+  const ids = [...byGroup.keys()].sort((a, b) => a - b);
+  if (ids.length < 2) return { thresholds: { [ids[0]]: reference }, goal: 0, perGroup: {} };
+
   const perGroup = {};
   for (const g of ids) {
     const idx = byGroup.get(g);
-    let best = { t: 0.5, score: -Infinity };
+    let best = { t: reference, score: -Infinity };
     for (let k = 10; k < grid - 10; k++) {
       const t = k / (grid - 1);
       let correct = 0;
       for (const i of idx) if ((scores[i] >= t ? 1 : 0) === rows[i].y) correct++;
-      const score = correct / idx.length - 0.001 * Math.abs(t - 0.5);
+      const score = correct / idx.length - 0.001 * Math.abs(t - reference);
       if (score > best.score) best = { t, score };
     }
     perGroup[g] = best.t;
   }
 
-  let adv = ids[0];
-  let dis = ids[ids.length - 1];
-  if (tprAt(byGroup.get(adv), rows, scores, perGroup[adv]) <
-      tprAt(byGroup.get(dis), rows, scores, perGroup[dis])) {
-    [adv, dis] = [dis, adv];
-  }
-  const goal = tprAt(byGroup.get(adv), rows, scores, perGroup[adv]);
-  const disIdx = byGroup.get(dis);
-  let chosen = perGroup[dis];
-  if (tprAt(disIdx, rows, scores, chosen) < goal - 1e-9) {
-    for (let k = grid - 1; k >= 0; k--) {
-      const t = k / (grid - 1);
-      if (tprAt(disIdx, rows, scores, t) >= goal - 1e-9) {
-        chosen = t;
-        break;
-      }
-    }
-  }
-  const out = {};
-  out[adv] = perGroup[adv];
-  out[dis] = chosen;
-  return out;
+  // Aim at the best TPR any group reaches at its own accuracy-maximizing
+  // operating point. Lifting every group to this higher target avoids the
+  // classic leveling-down failure where equalized odds crushes both TPRs.
+  const goal = Math.max(
+    ...ids.map((g) => tprAt(byGroup.get(g), rows, scores, reference)),
+    ...ids.map((g) => tprAt(byGroup.get(g), rows, scores, perGroup[g]))
+  );
+  const thresholds = {};
+  for (const g of ids) thresholds[g] = thresholdForTpr(byGroup.get(g), rows, scores, goal, reference);
+  return { thresholds, goal, perGroup };
+}
+
+export function optimizeGroupThresholds(rows, scores, options = {}) {
+  return fitGroupThresholds(rows, scores, options).thresholds;
+}
+
+/** Selection-rate target computed strictly from fitting rows. */
+export function selectionTargetFromTrain(rows, scores, threshold, subgroupKey) {
+  const byGroup = groupIndices(rows, subgroupKey);
+  const rates = {};
+  for (const [g, idx] of byGroup) rates[g] = selectionAt(idx, scores, threshold);
+  const values = Object.values(rates);
+  const target = values.length ? values.reduce((s, v) => s + v, 0) / values.length : 0;
+  return { target, rates };
 }
 
 /** One threshold per group targeting a specified selection rate. */
@@ -825,12 +850,7 @@ export function optimizeSelectionThresholds(rows, scores, options = {}) {
   const grid = options.grid ?? 101;
   const subgroupKey = options.subgroupKey || 'rural';
   const target = options.target ?? 0.5;
-  const byGroup = new Map();
-  for (let i = 0; i < rows.length; i++) {
-    const g = rows[i][subgroupKey] | 0;
-    if (!byGroup.has(g)) byGroup.set(g, []);
-    byGroup.get(g).push(i);
-  }
+  const byGroup = groupIndices(rows, subgroupKey);
   const out = {};
   for (const [g, idx] of byGroup) {
     let bestT = 0.5;
@@ -844,6 +864,42 @@ export function optimizeSelectionThresholds(rows, scores, options = {}) {
       }
     }
     out[g] = bestT;
+  }
+  return out;
+}
+
+/**
+ * Absolute gap changes are percentage points, not relative percentages. This
+ * helper is shared by the metric card and the strategy note so a widening gap
+ * can never be reported as a reduction or as "no gap".
+ */
+export function formatGapChange(gapDrop, actualGap, digits = 1) {
+  const pp = (x) => (Math.abs(x) * 100).toFixed(digits) + ' percentage points';
+  if (gapDrop < -0.0005) return 'gap increased by ' + pp(gapDrop);
+  if (gapDrop > 0.0005) return 'reduced by ' + pp(gapDrop);
+  if (actualGap <= 0.0005) return 'no gap (0.0%)';
+  if (actualGap <= 0.005) return 'gap unchanged (0.0%)';
+  return 'gap unchanged (' + (actualGap * 100).toFixed(digits) + '%)';
+}
+
+/** Human-readable recall and secondary-gap changes for each mitigation. */
+export function tradeoffNotes(audit) {
+  const base = audit.baseline.metrics;
+  const pp = (x) => (Math.abs(x) * 100).toFixed(1) + ' pp';
+  const out = [];
+  for (const s of audit.strategies) {
+    if (s.id === 'uncalibrated' || s.id === 'baseline') continue;
+    const m = s.metrics;
+    const changes = [];
+    const recall = m.recall - base.recall;
+    if (Math.abs(recall) > 0.0005) changes.push('overall recall ' + (recall > 0 ? '+' : '-') + pp(recall));
+    const eo = m.groups.equalOpportunityGap - base.groups.equalOpportunityGap;
+    if (eo > 0.0005) changes.push('EO gap +' + pp(eo));
+    const dp = m.groups.demographicParityGap - base.groups.demographicParityGap;
+    if (dp > 0.0005) changes.push('selection-rate gap +' + pp(dp));
+    const fnr = m.groups.fnrDisparity - base.groups.fnrDisparity;
+    if (fnr > 0.0005) changes.push('FNR gap +' + pp(fnr));
+    if (changes.length) out.push({ label: s.label, changes });
   }
   return out;
 }
@@ -963,6 +1019,9 @@ export function runAudit(options = {}) {
   const trainRaw = train.map((r) => lr.predictProba(r));
   const trainYs = train.map((r) => r.y);
   const cal = fitCalibration(trainRaw, trainYs);
+  // Every group threshold is fitted in the SAME calibrated probability space
+  // that is used to evaluate it on held-out rows.
+  const calTrain = trainRaw.map(cal.apply);
 
   const rawTest = test.map((r) => lr.predictProba(r));
   const calTest = rawTest.map(cal.apply);
@@ -982,16 +1041,19 @@ export function runAudit(options = {}) {
     test, calTest, threshold, subgroupKey
   );
 
-  const eoThresholds = optimizeGroupThresholds(train, trainRaw, { subgroupKey });
+  // Fit both threshold maps on calibrated TRAIN scores only. Held-out rows,
+  // including their labels, never influence a threshold or a target.
+  const eoFit = fitGroupThresholds(train, calTrain, { subgroupKey, referenceThreshold: threshold });
+  const eoThresholds = eoFit.thresholds;
   const eo = strategyWithThresholds(
     'equal-opportunity',
     'Equal opportunity mitigation',
-    'Group specific thresholds set so both groups reach the same true positive rate (Hardt et al., 2016).',
+    'Group-specific thresholds fitted on calibrated training scores lift every group toward the higher training TPR at the global threshold (Hardt et al., 2016).',
     test, calTest, eoThresholds, subgroupKey, scenario
   );
 
-  const selTarget = (baseline.metrics.groups.groupA.selectionRate + baseline.metrics.groups.groupB.selectionRate) / 2;
-  const selThresholds = optimizeSelectionThresholds(train, trainRaw, { subgroupKey, target: selTarget });
+  const { target: selTarget } = selectionTargetFromTrain(train, calTrain, threshold, subgroupKey);
+  const selThresholds = optimizeSelectionThresholds(train, calTrain, { subgroupKey, target: selTarget });
   const selection = strategyWithThresholds(
     'equal-selection',
     'Selection rate mitigation',
@@ -1001,8 +1063,12 @@ export function runAudit(options = {}) {
 
   const proxyKeys = featureKeys.filter((k) => k !== scenario.proxyKey);
   const lrNoProxy = trainLogisticRegression(train, { featureKeys: proxyKeys, l2: options.l2 ?? 0.02 });
+  const noProxyTrainRaw = train.map((r) => lrNoProxy.predictProba(r));
+  // The no-proxy model needs its OWN train-only calibration: borrowing the full
+  // model's mapping would evaluate it in the wrong probability space.
+  const calNoProxy = fitCalibration(noProxyTrainRaw, trainYs);
   const noProxyRaw = test.map((r) => lrNoProxy.predictProba(r));
-  const noProxyCalScores = noProxyRaw.map(cal.apply);
+  const noProxyCalScores = noProxyRaw.map(calNoProxy.apply);
   const proxy = singleStrategy(
     'proxy-removal',
     'Proxy feature removal',
@@ -1125,7 +1191,23 @@ export function runAudit(options = {}) {
       testRawBrier: uncalibrated.metrics.brier,
       testCalibratedBrier: baseline.metrics.brier,
       testRawEce: uncalibrated.metrics.ece,
-      testCalibratedEce: baseline.metrics.ece
+      testCalibratedEce: baseline.metrics.ece,
+      noProxy: {
+        a: calNoProxy.a,
+        b: calNoProxy.b,
+        temperature: calNoProxy.temperature,
+        trainBrier: calNoProxy.trainBrier,
+        calibratedBrier: calNoProxy.calibratedBrier,
+        trainEce: calNoProxy.trainEce,
+        calibratedEce: calNoProxy.calibratedEce
+      }
+    },
+    fitting: {
+      // Diagnostics from the TRAIN split only, exposed for the UI and tests.
+      selectionTarget: selTarget,
+      eoGoalTpr: eoFit.goal,
+      eoPerGroupThreshold: eoFit.perGroup,
+      space: 'calibrated-train'
     },
     strategies,
     baseline,
