@@ -182,6 +182,11 @@ function renderMiniStats(audit, wallMs) {
     ['temperature', num(audit.calibration.temperature, 2)],
     ['train ECE', num(audit.calibration.rawEce) + ' → ' + num(audit.calibration.calibratedEce)],
     ['train Brier', num(audit.calibration.rawBrier) + ' → ' + num(audit.calibration.calibratedBrier)],
+    ['Brier parts', 'rel ' + num(audit.calibration.testDecomposition.reliability) +
+      ' - res ' + num(audit.calibration.testDecomposition.resolution) +
+      ' + unc ' + num(audit.calibration.testDecomposition.uncertainty)],
+    ['PPV gap', pct(audit.baseline.metrics.groups.ppvDisparity)],
+    ['NPV gap', pct(audit.baseline.metrics.groups.npvDisparity)],
     ['engine time', Math.round(audit.performance.totalMs) + ' ms'],
     ['end to end', Math.round(wallMs) + ' ms']
   ];
@@ -278,17 +283,29 @@ function renderHidden(audit) {
   const b = audit.baseline.metrics;
   const eo = audit.strategies.find((s) => s.id === 'equal-opportunity');
   const g = b.groups;
+  const harmedIsB = g.groupB.fnr >= g.groupA.fnr;
+  const harmed = harmedIsB ? g.groupB : g.groupA;
+  const other = harmedIsB ? g.groupA : g.groupB;
+  const harmedLabel = audit.groupLabels[harmedIsB ? 1 : 0] || 'Harmed group';
+  const otherLabel = audit.groupLabels[harmedIsB ? 0 : 1] || 'Other group';
+  const gapBefore = g.fnrDisparity;
+  const gapAfter = eo.metrics.groups.fnrDisparity;
+  const recall = eo.metrics.recall - b.recall;
   $('h-accuracy').textContent = pct(b.accuracy);
   $('h-auc').textContent = num(b.auc);
-  $('h-fnr').textContent = pct(g.groupB.fnr);
-  $('h-fnr0').textContent = pct(g.groupA.fnr);
-  $('h-disp').textContent = pct(g.fnrDisparity) + ' -> ' + pct(eo.metrics.groups.fnrDisparity);
-  const recall = eo.metrics.recall - b.recall;
+  $('h-fnr').textContent = pct(harmed.fnr);
+  $('h-fnr-label').textContent = harmedLabel + ' missed rate';
+  $('h-fnr0').textContent = pct(other.fnr);
+  $('h-fnr0-label').textContent = otherLabel + ' missed rate';
+  $('h-disp').textContent = pct(gapBefore) + ' → ' + pct(gapAfter);
   $('h-recall').textContent = (recall >= 0 ? '+' : '') + (recall * 100).toFixed(1) + ' pp';
+  $('hidden-headline').textContent =
+    pct(b.accuracy) + ' overall accuracy hides a ' + pct(harmed.fnr) + ' missed rate for ' + harmedLabel +
+    '. Equal opportunity cuts the gap from ' + pct(gapBefore) + ' to ' + pct(gapAfter) +
+    ' at ' + (recall >= 0 ? '+' : '') + (recall * 100).toFixed(1) + ' points of recall.';
   $('hidden-note').textContent =
-    audit.scenarioName + ': ' + pct(b.accuracy) + ' accuracy and ' + num(b.auc) + ' AUC, but the harmed subgroup FNR is ' +
-    pct(g.groupB.fnr) + ' vs ' + pct(g.groupA.fnr) + '. Equal opportunity moves FNR disparity from ' +
-    pct(g.fnrDisparity) + ' to ' + pct(eo.metrics.groups.fnrDisparity) + '.';
+    'Same held-out rows: ' + num(b.auc) + ' ROC-AUC, ' + pct(other.fnr) + ' missed rate for ' + otherLabel +
+    '. Thresholds were fitted on training rows only; no tested row influenced the fix.';
 }
 
 function renderCharts(audit) {
@@ -328,7 +345,10 @@ function wire() {
     $('seed').value = '20270101';
     run();
     const el = document.getElementById('hidden-failure');
-    if (el) el.scrollIntoView({ behavior: 'auto', block: 'start' });
+    if (el) {
+      const top = window.scrollY + el.getBoundingClientRect().top - 12;
+      window.scrollTo({ top: Math.max(0, top), behavior: 'auto' });
+    }
   });
   $('scenario').addEventListener('change', run);
   for (const id of ['bias', 'threshold']) $(id).addEventListener('input', scheduleAudit);

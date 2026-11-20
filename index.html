@@ -68,9 +68,18 @@
     </section>
 
     <!-- Hidden subgroup failure -->
-    <section class="section hidden-failure" aria-labelledby="hidden-title">
+    <section id="hidden-failure" class="section hidden-failure" aria-labelledby="hidden-title">
       <h2 id="hidden-title">High overall accuracy can hide subgroup failure.</h2>
+      <p class="hidden-headline" id="hidden-headline">One click reveals a group the model misses.</p>
       <div class="hidden-grid" id="hidden-grid">
+        <div class="hidden-card warn anchor">
+          <span class="metric-label" id="h-fnr-label">Harmed group missed rate</span>
+          <strong class="metric-value big" id="h-fnr">--</strong>
+        </div>
+        <div class="hidden-card accent">
+          <span class="metric-label">Miss-rate gap, before vs after</span>
+          <strong class="metric-value" id="h-disp">--</strong>
+        </div>
         <div class="hidden-card">
           <span class="metric-label">Overall accuracy</span>
           <strong class="metric-value" id="h-accuracy">--</strong>
@@ -79,17 +88,9 @@
           <span class="metric-label">ROC-AUC</span>
           <strong class="metric-value" id="h-auc">--</strong>
         </div>
-        <div class="hidden-card warn">
-          <span class="metric-label">Harmed group FNR</span>
-          <strong class="metric-value" id="h-fnr">--</strong>
-        </div>
         <div class="hidden-card">
-          <span class="metric-label">Advantaged group FNR</span>
+          <span class="metric-label" id="h-fnr0-label">Other group missed rate</span>
           <strong class="metric-value" id="h-fnr0">--</strong>
-        </div>
-        <div class="hidden-card accent">
-          <span class="metric-label">FNR disparity before / after</span>
-          <strong class="metric-value" id="h-disp">--</strong>
         </div>
         <div class="hidden-card">
           <span class="metric-label">Recall change</span>

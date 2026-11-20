@@ -500,31 +500,78 @@ export function trainDecisionTree(rows, options = {}) {
 /* ------------------------------------------------------------------ */
 
 export function rocAuc(scores, ys) {
-  const pos = [];
-  const neg = [];
-  const n = scores ? scores.length : 0;
+  const ss = Array.isArray(scores) ? scores : [];
+  const yy = Array.isArray(ys) ? ys : [];
+  const n = Math.min(ss.length, yy.length);
+  let positives = 0;
+  const items = [];
   for (let i = 0; i < n; i++) {
-    const y = ys && ys[i] ? 1 : 0;
-    const sc = sanitizeNumber(scores[i], 0);
-    (y ? pos : neg).push(sc);
+    const y = yy[i] ? 1 : 0;
+    if (y) positives++;
+    items.push({ sc: sanitizeNumber(ss[i], 0), y });
   }
-  if (!pos.length || !neg.length) return 0.5;
-  pos.sort((a, b) => a - b);
-  neg.sort((a, b) => a - b);
-  let wins = 0;
-  let j = 0;
-  for (const s of pos) {
-    while (j < neg.length && neg[j] < s) j++;
-    let ties = 0;
-    while (j + ties < neg.length && neg[j + ties] === s) ties++;
-    wins += j + 0.5 * ties;
+  const negatives = n - positives;
+  if (!positives || !negatives) return 0.5;
+  // Mann-Whitney U with midpoint ranks for ties, equivalent to giving each
+  // positive 1 credit per strictly lower negative and 0.5 per tied negative.
+  items.sort((a, b) => a.sc - b.sc);
+  let rankSum = 0;
+  let i = 0;
+  while (i < n) {
+    let j = i + 1;
+    while (j < n && items[j].sc === items[i].sc) j++;
+    const midRank = (i + j - 1) / 2 + 1;
+    for (let k = i; k < j; k++) if (items[k].y) rankSum += midRank;
+    i = j;
   }
-  return wins / (pos.length * neg.length);
+  return (rankSum - (positives * (positives + 1)) / 2) / (positives * negatives);
 }
 
 export function brierScore(scores, ys) {
   if (!scores.length) return 0;
   return scores.reduce((s, p, i) => s + (p - ys[i]) ** 2, 0) / scores.length;
+}
+
+/**
+ * Standard Brier decomposition: BS = reliability - resolution + uncertainty.
+ * Reliability is the squared gap between predicted probability and the
+ * observed frequency within equal-probability groups; resolution is the
+ * spread of those group frequencies around the base rate; uncertainty is the
+ * variance of the labels themselves. All terms are nonnegative and the
+ * identity holds exactly (up to floating point) on finite inputs.
+ */
+export function brierDecomposition(scores, ys) {
+  const ss = Array.isArray(scores) ? scores : [];
+  const yy = Array.isArray(ys) ? ys : [];
+  const n = Math.min(ss.length, yy.length);
+  if (!n) return { brier: 0, reliability: 0, resolution: 0, uncertainty: 0 };
+  let pos = 0;
+  const groups = new Map();
+  for (let i = 0; i < n; i++) {
+    const p = sanitizeNumber(ss[i], 0);
+    const y = yy[i] ? 1 : 0;
+    if (y) pos++;
+    const key = p.toPrecision(12);
+    if (!groups.has(key)) groups.set(key, { p, count: 0, positives: 0 });
+    const g = groups.get(key);
+    g.count++;
+    g.positives += y;
+  }
+  const base = pos / n;
+  let reliability = 0;
+  let resolution = 0;
+  for (const g of groups.values()) {
+    const observed = g.positives / g.count;
+    reliability += g.count * (g.p - observed) ** 2;
+    resolution += g.count * (observed - base) ** 2;
+  }
+  const uncertainty = base * (1 - base);
+  return {
+    brier: brierScore(ss.slice(0, n), yy.slice(0, n)),
+    reliability: reliability / n,
+    resolution: resolution / n,
+    uncertainty
+  };
 }
 
 function binIndex(score, bins) {
@@ -678,6 +725,8 @@ export function subgroupMetrics(rows, scores, threshold, subgroupKey) {
       tpr: s.positives ? s.tp / s.positives : 0,
       fnr: s.positives ? s.fn / s.positives : 0,
       fpr: (s.n - s.positives) > 0 ? s.fp / (s.n - s.positives) : 0,
+      ppv: s.tp + s.fp ? s.tp / (s.tp + s.fp) : 0,
+      npv: s.tn + s.fn ? s.tn / (s.tn + s.fn) : 0,
       calibrationError: safeDiv(Math.abs(s.acc - s.conf), s.n, 0),
       counts: { tp: s.tp, fp: s.fp, tn: s.tn, fn: s.fn }
     };
@@ -692,8 +741,8 @@ function ysAt(rows, i) {
 export function fairnessSummary(groups, subgroupKey) {
   const ids = Object.keys(groups).map(Number).sort((a, b) => a - b);
   if (ids.length === 0) {
-    const empty = { n: 0, positives: 0, prevalence: 0, selectionRate: 0, tpr: 0, fnr: 0, fpr: 0, calibrationError: 0, counts: { tp: 0, fp: 0, tn: 0, fn: 0 } };
-    return { subgroupKey, groups: [], groupA: empty, groupB: empty, demographicParityGap: 0, equalOpportunityGap: 0, equalOpportunityGapRatio: 0, fnrDisparity: 0, fnrRatio: 1, subgroupCalibrationGap: 0 };
+    const empty = { n: 0, positives: 0, prevalence: 0, selectionRate: 0, tpr: 0, fnr: 0, fpr: 0, ppv: 0, npv: 0, calibrationError: 0, counts: { tp: 0, fp: 0, tn: 0, fn: 0 } };
+    return { subgroupKey, groups: [], groupA: empty, groupB: empty, demographicParityGap: 0, equalOpportunityGap: 0, equalOpportunityGapRatio: 0, fnrDisparity: 0, fnrRatio: 1, ppvDisparity: 0, npvDisparity: 0, subgroupCalibrationGap: 0 };
   }
   const a = groups[ids[0]];
   const b = ids.length > 1 ? groups[ids[ids.length - 1]] : groups[ids[0]];
@@ -710,6 +759,8 @@ export function fairnessSummary(groups, subgroupKey) {
     equalOpportunityGapRatio: maxTpr > 0 ? Math.abs(a.tpr - b.tpr) / maxTpr : 0,
     fnrDisparity: Math.abs(a.fnr - b.fnr),
     fnrRatio: maxFnr > 0 ? safeDiv(Math.min(a.fnr, b.fnr), maxFnr, 1) : 1,
+    ppvDisparity: Math.abs((a.ppv || 0) - (b.ppv || 0)),
+    npvDisparity: Math.abs((a.npv || 0) - (b.npv || 0)),
     subgroupCalibrationGap: Math.abs(a.calibrationError - b.calibrationError)
   };
 }
@@ -866,7 +917,9 @@ export function fitGroupThresholds(rows, scores, options = {}) {
   const reference = (options && options.referenceThreshold) ?? 0.5;
   const byGroup = groupIndices(rr, subgroupKey);
   const ids = [...byGroup.keys()].sort((a, b) => a - b);
-  if (ids.length < 2) return { thresholds: { [ids[0]]: reference }, goal: 0, perGroup: {} };
+  if (ids.length < 2) {
+    return { thresholds: ids.length ? { [ids[0]]: reference } : {}, goal: 0, perGroup: {} };
+  }
 
   const perGroup = {};
   for (const g of ids) {
@@ -1021,6 +1074,8 @@ function strategyWithThresholds(id, label, blurb, rows, scores, thresholds, subg
       tpr: s.positives ? s.tp / s.positives : 0,
       fnr: s.positives ? s.fn / s.positives : 0,
       fpr: s.n - s.positives ? s.fp / (s.n - s.positives) : 0,
+      ppv: s.tp + s.fp ? s.tp / (s.tp + s.fp) : 0,
+      npv: s.tn + s.fn ? s.tn / (s.tn + s.fn) : 0,
       calibrationError: safeDiv(Math.abs(s.acc - s.conf), s.n, 0),
       counts: { tp: s.tp, fp: s.fp, tn: s.tn, fn: s.fn }
     };
@@ -1264,6 +1319,8 @@ export function runAudit(options = {}) {
       testCalibratedBrier: baseline.metrics.brier,
       testRawEce: uncalibrated.metrics.ece,
       testCalibratedEce: baseline.metrics.ece,
+      testDecomposition: brierDecomposition(calTest, ys),
+      rawDecomposition: brierDecomposition(rawTest, ys),
       noProxy: {
         a: calNoProxy.a,
         b: calNoProxy.b,
@@ -1356,14 +1413,22 @@ export function parseCsv(text) {
   return { headers, rows, skipped };
 }
 
-/** Validate parsed rows against a minimal schema: required keys present. */
-export function validateCsvRows(rows, requiredKeys = []) {
+/** Validate parsed rows: required keys present and probabilities in [0, 1]. */
+export function validateCsvRows(rows, requiredKeys = [], probabilityKeys = []) {
   const rr = Array.isArray(rows) ? rows : [];
   const required = Array.isArray(requiredKeys) ? requiredKeys : [];
+  const probs = Array.isArray(probabilityKeys) ? probabilityKeys : [];
   const errors = [];
   rr.forEach((row, idx) => {
     for (const key of required) {
       if (row == null || row[key] == null || row[key] === '') errors.push({ row: idx + 1, key, message: 'missing ' + key });
+    }
+    for (const key of probs) {
+      if (row == null || row[key] == null) continue;
+      const value = typeof row[key] === 'number' ? row[key] : Number(row[key]);
+      if (!Number.isFinite(value) || value < 0 || value > 1) {
+        errors.push({ row: idx + 1, key, message: 'probability must be a number between 0 and 1' });
+      }
     }
   });
   return { valid: errors.length === 0, errors };
@@ -1397,6 +1462,8 @@ export function exportAudit(audit) {
     ece: s.metrics.ece,
     dp_gap: s.metrics.groups.demographicParityGap,
     eo_gap: s.metrics.groups.equalOpportunityGap,
-    fnr_gap: s.metrics.groups.fnrDisparity
+    fnr_gap: s.metrics.groups.fnrDisparity,
+    ppv_gap: s.metrics.groups.ppvDisparity,
+    npv_gap: s.metrics.groups.npvDisparity
   }));
 }

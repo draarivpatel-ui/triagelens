@@ -2,6 +2,36 @@
  * Every chart reads theme colors from CSS custom properties so it works in
  * both the light and dark palettes. */
 
+function bindTooltip(canvas, entries) {
+  if (!canvas || !entries || !entries.length) return;
+  let tip = canvas._tip;
+  if (!tip) {
+    tip = document.createElement('div');
+    tip.className = 'chart-tooltip';
+    tip.hidden = true;
+    const host = canvas.parentElement || document.body;
+    host.appendChild(tip);
+    canvas._tip = tip;
+  }
+  canvas.onmousemove = (event) => {
+    const rect = canvas.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+    let best = null;
+    let bestDistance = Infinity;
+    for (const e of entries) {
+      const d = (e.x - x) ** 2 + (e.y - y) ** 2;
+      if (d < bestDistance) { bestDistance = d; best = e; }
+    }
+    if (!best || bestDistance > 26 ** 2) { tip.hidden = true; return; }
+    tip.textContent = best.label;
+    tip.hidden = false;
+    tip.style.left = Math.min(rect.width - tip.offsetWidth - 4, Math.max(4, x + 12)) + 'px';
+    tip.style.top = Math.max(4, y - tip.offsetHeight - 8) + 'px';
+  };
+  canvas.onmouseleave = () => { tip.hidden = true; };
+}
+
 function palette() {
   const cs = getComputedStyle(document.documentElement);
   const get = (name, fallback) => (cs.getPropertyValue(name) || fallback).trim();
@@ -120,6 +150,13 @@ export function drawRoc(canvas, points, auc) {
   ctx.textAlign = 'right';
   ctx.textBaseline = 'top';
   ctx.fillText('AUC ' + (auc ?? 0).toFixed(3), m.l + pw - 8, m.t + 8);
+
+  const entries = points.map((pt) => ({
+    x: m.l + pt.fpr * pw,
+    y: m.t + (1 - pt.tpr) * ph,
+    label: 'FPR ' + pt.fpr.toFixed(3) + ', TPR ' + pt.tpr.toFixed(3)
+  }));
+  bindTooltip(canvas, entries);
 }
 
 /** Ten bin reliability diagram with perfect-calibration reference. */
@@ -174,6 +211,14 @@ export function drawReliability(canvas, bins) {
   ctx.strokeStyle = p.gold;
   ctx.lineWidth = 1.6;
   ctx.stroke();
+
+  const entries = bins.filter((b) => b.n).map((b) => ({
+    x: m.l + b.confidence * pw,
+    y: m.t + (1 - b.observed) * ph,
+    label: 'bin ' + b.lo.toFixed(1) + '-' + b.hi.toFixed(1) + ': predicted ' +
+      b.confidence.toFixed(3) + ', observed ' + b.observed.toFixed(3) + ', n=' + b.n
+  }));
+  bindTooltip(canvas, entries);
 }
 
 /** Grouped bars: TPR and FNR per subgroup for each strategy. */
@@ -191,6 +236,7 @@ export function drawDisparity(canvas, strategies, groupLabels) {
   const groupW = pw / shown.length;
   const barW = Math.min(28, (groupW - 20) / 4);
   const colors = [p.accent, p.clay, p.blue, p.gold];
+  const entries = [];
 
   shown.forEach((strategy, si) => {
     const g = strategy.metrics.groups;
@@ -206,6 +252,14 @@ export function drawDisparity(canvas, strategies, groupLabels) {
       ctx.globalAlpha = vi < 2 ? 1 : 0.55;
       ctx.fillRect(gx - barW / 2, gy, barW, m.t + ph - gy);
       ctx.globalAlpha = 1;
+      const names = ['TPR group 0', 'TPR group 1', 'FNR group 0', 'FNR group 1'];
+      const groupNames = [(groupLabels && groupLabels[0]) || 'Group 0', (groupLabels && groupLabels[1]) || 'Group 1'];
+      entries.push({
+        x: gx,
+        y: gy + (m.t + ph - gy) / 2,
+        label: strategy.label + ' - ' + (vi < 2 ? 'TPR ' : 'FNR ') + groupNames[vi % 2] + ': ' +
+          (v * 100).toFixed(1) + '% (' + names[vi] + ')'
+      });
     });
     ctx.fillStyle = p.soft;
     ctx.font = '10px ' + getComputedStyle(document.body).fontFamily;
@@ -223,16 +277,21 @@ export function drawDisparity(canvas, strategies, groupLabels) {
     [p.gold, 'Group 1 FNR']
   ];
   let lx = m.l;
+  let ly = 13;
+  const maxLx = w - 8;
   legend.forEach(([color, label]) => {
-    ctx.fillStyle = color;
-    ctx.fillRect(lx, 8, 10, 10);
-    ctx.fillStyle = p.faint;
     ctx.font = '10px ' + getComputedStyle(document.body).fontFamily;
+    const labelWidth = ctx.measureText(label).width;
+    if (lx + 18 + labelWidth + 10 > maxLx) { lx = m.l; ly += 14; }
+    ctx.fillStyle = color;
+    ctx.fillRect(lx, ly - 5, 10, 10);
+    ctx.fillStyle = p.faint;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    ctx.fillText(label, lx + 15, 13);
-    lx += 18 + ctx.measureText(label).width + 18;
+    ctx.fillText(label, lx + 15, ly);
+    lx += 18 + labelWidth + 18;
   });
+  bindTooltip(canvas, entries);
 }
 
 /** Training loss curve. */

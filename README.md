@@ -21,6 +21,13 @@ There is no build step and no install. Run the deterministic unit tests with:
 
 ```bash
 node --test tests/ml-engine.test.mjs
+node --test tests/wave2-regression.test.mjs
+```
+
+Or run both suites together (the exact command used to verify the final counts below):
+
+```bash
+node --test tests/ml-engine.test.mjs tests/wave2-regression.test.mjs
 ```
 
 ## What it does
@@ -34,24 +41,24 @@ node --test tests/ml-engine.test.mjs
    - Depth-limited Gini decision tree with interpretable rules.
 3. **Calibration** - Platt / temperature scaling fitted on **training rows only**; reported on held-out rows. A guard keeps the identity mapping if a fit would worsen the combined Brier + ECE objective. Proxy removal fits its own train-only calibration.
 4. **Four mitigation policies plus an uncalibrated baseline on the same held-out rows**: calibrated global threshold, equal-opportunity thresholds, selection-rate thresholds, and proxy-feature removal.
-5. **Exact held-out metrics**: accuracy, precision, recall, F1, ROC-AUC, Brier score, 10-bin ECE, plus per-subgroup selection rate (demographic parity gap), TPR (equal opportunity gap), FNR disparity, and subgroup calibration error.
+5. **Exact held-out metrics**: accuracy, precision, recall, F1, ROC-AUC, Brier score with a reliability - resolution + uncertainty decomposition, 10-bin ECE, plus per-subgroup selection rate (demographic parity gap), TPR (equal opportunity gap), FNR disparity, PPV/NPV gaps, and subgroup calibration error. ROC-AUC uses standard Mann-Whitney half-credit tie handling; the CSV validator rejects out-of-range probabilities, and charts expose hover tooltips.
 6. **Explicit trade-off reporting**: a live banner names every mitigation that lowers overall recall or widens a secondary gap, so no cost is hidden.
 7. **Counterexample inspector**: specific held-out positives from the harmed subgroup that the global threshold misses but a mitigation recovers.
 8. **Model card and ethics panel**: who benefits, who could be harmed, likely failure modes, and why a human must decide.
 
 ## Observed benchmark output
 
-`node --test tests/ml-engine.test.mjs` (Node v26.8.1):
+`node --test tests/ml-engine.test.mjs tests/wave2-regression.test.mjs` (Node v26.8.1):
 
 ```text
-ℹ tests 118
+ℹ tests 135
 ℹ suites 0
-ℹ pass 54
+ℹ pass 135
 ℹ fail 0
 ℹ cancelled 0
 ℹ skipped 0
 ℹ todo 0
-ℹ duration_ms ~3000 (indicative)
+ℹ duration_ms ~2200 (indicative)
 ```
 
 `runAudit()` at seed 20270101, bias 0.60, threshold 0.35, n = 1400 (all numbers below are generated directly from live code output; timings are indicative only and vary by machine):
@@ -103,6 +110,7 @@ src/ml-engine.js           PRNG, generators, models, calibration, fairness, metr
 src/charts.js              Canvas ROC, reliability, disparity, loss charts
 src/app.js                 UI controller, exports, accessibility wiring
 tests/ml-engine.test.mjs   118 deterministic Node tests
+tests/wave2-regression.test.mjs  17 tests for statistical identities, CSV validation, demo wiring and UI rules
 video/narration.txt        2-5 minute demo narration
 video/steps.json           verified demo click/tap choreography
 ```
