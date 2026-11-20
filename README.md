@@ -17,17 +17,10 @@ python3 -m http.server 8000
 # If you serve the parent folder instead, open http://localhost:8000/triagelens/
 ```
 
-There is no build step and no install. Run the deterministic unit tests with:
+There is no build step and no install. Run the full deterministic suite (the exact command used to verify the final counts below):
 
 ```bash
-node --test tests/ml-engine.test.mjs
-node --test tests/wave2-regression.test.mjs
-```
-
-Or run both suites together (the exact command used to verify the final counts below):
-
-```bash
-node --test tests/ml-engine.test.mjs tests/wave2-regression.test.mjs
+node --test
 ```
 
 ## What it does
@@ -41,19 +34,19 @@ node --test tests/ml-engine.test.mjs tests/wave2-regression.test.mjs
    - Depth-limited Gini decision tree with interpretable rules.
 3. **Calibration** - Platt / temperature scaling fitted on **training rows only**; reported on held-out rows. A guard keeps the identity mapping if a fit would worsen the combined Brier + ECE objective. Proxy removal fits its own train-only calibration.
 4. **Four mitigation policies plus an uncalibrated baseline on the same held-out rows**: calibrated global threshold, equal-opportunity thresholds, selection-rate thresholds, and proxy-feature removal.
-5. **Exact held-out metrics**: accuracy, precision, recall, F1, ROC-AUC, Brier score with a reliability - resolution + uncertainty decomposition, 10-bin ECE, plus per-subgroup selection rate (demographic parity gap), TPR (equal opportunity gap), FNR disparity, PPV/NPV gaps, and subgroup calibration error. ROC-AUC uses standard Mann-Whitney half-credit tie handling; the CSV validator rejects out-of-range probabilities, and charts expose hover tooltips.
-6. **Explicit trade-off reporting**: a live banner names every mitigation that lowers overall recall or widens a secondary gap, so no cost is hidden.
+5. **Exact held-out metrics**: accuracy, precision, recall, F1, ROC-AUC, Brier score with a reliability - resolution + uncertainty decomposition, 10-bin ECE, plus per-subgroup selection rate (demographic parity gap), TPR (equal opportunity gap), FNR disparity, FPR gap, PPV/NPV gaps, and subgroup calibration error. Every disparity is the worst gap across all subgroup pairs, so a third subgroup can never hide between two displayed extremes. Each subgroup TPR, FNR and selection rate carries a Wilson 95% confidence interval so small-sample error rates stay honestly uncertain. ROC-AUC uses standard Mann-Whitney half-credit tie handling; the CSV validator rejects out-of-range probabilities, and charts expose hover tooltips.
+6. **Explicit trade-off reporting**: a live banner names every mitigation that lowers overall recall or widens a secondary gap (including the FPR gap), so no cost is hidden.
 7. **Counterexample inspector**: specific held-out positives from the harmed subgroup that the global threshold misses but a mitigation recovers.
 8. **Model card and ethics panel**: who benefits, who could be harmed, likely failure modes, and why a human must decide.
 
 ## Observed benchmark output
 
-`node --test tests/ml-engine.test.mjs tests/wave2-regression.test.mjs` (Node v26.8.1):
+`node --test` (Node v26.8.1):
 
 ```text
-ℹ tests 135
+ℹ tests 156
 ℹ suites 0
-ℹ pass 135
+ℹ pass 156
 ℹ fail 0
 ℹ cancelled 0
 ℹ skipped 0
@@ -90,6 +83,8 @@ All engine timings above are indicative measurements from one representative run
 
 The equal-opportunity mitigation implements post-processing after Hardt, Price and Srebro (2016), with a deliberate anti-leveling-down change. Every threshold is fitted on **calibrated training scores only**, in the exact same probability space used for held-out evaluation. The target is the higher TPR observed at the group's own accuracy-maximizing operating point or at the global working threshold; every group's threshold is then chosen to reach that target TPR instead of being dragged down to the lowest group's accuracy-maximizing TPR. This keeps overall recall at or above the global baseline: at the documented defaults, equal opportunity raises recall by 1.8 pp (clinic), 5.5 pp (scholarship), and 4.3 pp (shelter).
 
+A Pareto-safety guard keeps the optimizer honest on pathological inputs: when a subgroup's own score distribution separates positives from negatives at or below the chance line (group-level AUC <= 0.5, an inverted or non-informative distribution), no threshold move can be informative, so the group keeps the global threshold and the trade-off banner says so rather than buying parity with a false-positive explosion. A second check refuses any mitigated operating point that would land on or below the chance line. On the verified default datasets neither check ever fires.
+
 Selection-rate mitigation picks per-group thresholds nearest a selection target computed strictly from calibrated **train** rows. Proxy removal retrains without the named proxy feature and fits its own train-only calibration. No threshold, target, or calibration parameter reads a held-out row. The live trade-off banner reports any mitigation that changes overall recall or widens a secondary gap (for example, clinic equal opportunity lifts recall but widens the selection-rate gap by 3.6 pp).
 
 ## Ethics and limits
@@ -98,7 +93,7 @@ Selection-rate mitigation picks per-group thresholds nearest a selection target 
 - Fairness gaps compare only the two groups in each benchmark; real fairness audits need far more context.
 - Equal opportunity can change overall accuracy and secondary gaps. Every such change is shown in the trade-off banner, not hidden.
 - Removing one proxy does not erase bias carried by correlated features.
-- Small subgroups make observed error rates noisy. At the clinic default, train and held-out TPR curves differ enough that a train-only equal-opportunity fit can only close a small part of the observed gap; the banner reports the residual honestly.
+- Small subgroups make observed error rates noisy. At the clinic default, train and held-out TPR curves differ enough that a train-only equal-opportunity fit can only close a small part of the observed gap; the banner reports the residual honestly, and every subgroup rate carries a Wilson 95% interval. On tiny samples a lift that looks informative on training rows can still cost held-out false positives; when the FPR gap widens the banner names it.
 - **A human must decide.** TriageLens is a teaching tool, never a clinical, educational, or shelter-placement decision system.
 
 ## Files
@@ -111,6 +106,7 @@ src/charts.js              Canvas ROC, reliability, disparity, loss charts
 src/app.js                 UI controller, exports, accessibility wiring
 tests/ml-engine.test.mjs   118 deterministic Node tests
 tests/wave2-regression.test.mjs  17 tests for statistical identities, CSV validation, demo wiring and UI rules
+tests/wave3-regression.test.mjs  21 tests for adversarial inputs, optimizer guards, Wilson intervals and honest reporting
 video/narration.txt        2-5 minute demo narration
 video/steps.json           verified demo click/tap choreography
 ```

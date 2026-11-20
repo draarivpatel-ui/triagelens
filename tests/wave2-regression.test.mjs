@@ -240,6 +240,8 @@ test('charts bind tooltips and the disparity legend wraps on narrow canvases', (
 test('README does not leak AI-tool mentions and documents the exact test command', () => {
   const readme = read('README.md');
   assert.doesNotMatch(readme, /\b(claude|gpt|llm|chatgpt|copilot|generative ai|artificial intelligence)\b/i);
-  assert.match(readme, /node --test tests\/ml-engine\.test\.mjs/);
-  assert.match(readme, /node --test tests\/wave2-regression\.test\.mjs/);
+  assert.match(readme, /node --test\n|node --test tests\//);
+  assert.match(readme, /ml-engine\.test\.mjs/);
+  assert.match(readme, /wave2-regression\.test\.mjs/);
+  assert.match(readme, /wave3-regression\.test\.mjs/);
 });

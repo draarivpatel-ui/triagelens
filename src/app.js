@@ -187,6 +187,7 @@ function renderMiniStats(audit, wallMs) {
       ' + unc ' + num(audit.calibration.testDecomposition.uncertainty)],
     ['PPV gap', pct(audit.baseline.metrics.groups.ppvDisparity)],
     ['NPV gap', pct(audit.baseline.metrics.groups.npvDisparity)],
+    ['FPR gap', pct(audit.baseline.metrics.groups.fprDisparity)],
     ['engine time', Math.round(audit.performance.totalMs) + ' ms'],
     ['end to end', Math.round(wallMs) + ' ms']
   ];
@@ -303,9 +304,13 @@ function renderHidden(audit) {
     pct(b.accuracy) + ' overall accuracy hides a ' + pct(harmed.fnr) + ' missed rate for ' + harmedLabel +
     '. Equal opportunity cuts the gap from ' + pct(gapBefore) + ' to ' + pct(gapAfter) +
     ' at ' + (recall >= 0 ? '+' : '') + (recall * 100).toFixed(1) + ' points of recall.';
+  const ci = harmed.fnrCi;
+  const ciText = ci
+    ? ' ' + harmedLabel + ' missed-rate 95% CI ' + pct(ci.lo) + ' to ' + pct(ci.hi) + ' (n=' + harmed.n + ').'
+    : '';
   $('hidden-note').textContent =
     'Same held-out rows: ' + num(b.auc) + ' ROC-AUC, ' + pct(other.fnr) + ' missed rate for ' + otherLabel +
-    '. Thresholds were fitted on training rows only; no tested row influenced the fix.';
+    '.' + ciText + ' Thresholds were fitted on training rows only; no tested row influenced the fix.';
 }
 
 function renderCharts(audit) {

@@ -141,6 +141,7 @@ html[data-theme='dark'] .brand-mark { color: #0d1f19; }
   color: var(--accent-ink);
   background: var(--accent-soft);
 }
+.privacy-pill { white-space: nowrap; }
 .privacy-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
 .icon-button {
   width: 38px;
@@ -264,6 +265,7 @@ main { max-width: 1440px; margin: 0 auto; }
   gap: 2px;
 }
 .metric-card.accent { background: var(--accent-soft); border-color: var(--accent); }
+.metric-card.accent .metric-label, .metric-card.accent .metric-foot { color: var(--accent-ink); }
 .metric-label { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-faint); }
 .metric-value { font-family: var(--serif); font-size: 30px; line-height: 1.2; font-variant-numeric: tabular-nums; }
 .metric-foot { font-size: 11px; color: var(--ink-faint); }
@@ -460,9 +462,15 @@ canvas { display: block; width: 100%; height: auto; background: transparent; }
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 .hidden-card.warn { border-color: var(--clay); }
 .hidden-card.accent { border-color: var(--accent); }
+/* Faint labels fall below 4.5:1 on tinted card fills; step them up a level. */
+.metric-card.accent .metric-label,
+.hidden-card.warn.anchor .metric-label { color: var(--ink-soft); }
 .hidden-note { margin-top: 12px; color: var(--ink-soft); }
 @media (max-width: 720px) {
   .hidden-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }

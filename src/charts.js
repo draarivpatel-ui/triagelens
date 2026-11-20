@@ -26,6 +26,7 @@ function bindTooltip(canvas, entries) {
     if (!best || bestDistance > 26 ** 2) { tip.hidden = true; return; }
     tip.textContent = best.label;
     tip.hidden = false;
+    // Measure after unhiding: a hidden tooltip reports zero size.
     tip.style.left = Math.min(rect.width - tip.offsetWidth - 4, Math.max(4, x + 12)) + 'px';
     tip.style.top = Math.max(4, y - tip.offsetHeight - 8) + 'px';
   };
@@ -226,25 +227,51 @@ export function drawDisparity(canvas, strategies, groupLabels) {
   const s = setup(canvas);
   if (!s) return;
   const { ctx, w, h, p } = s;
-  const m = { l: 42, r: 16, t: 30, b: 64 };
-  const pw = w - m.l - m.r;
-  const ph = h - m.t - m.b;
-  axes(ctx, m.l, m.t, pw, ph, p, ticks(), ticks());
-
   const shown = strategies.filter((st) => st.id !== 'uncalibrated');
   if (!shown.length) return;
+
+  // Legend first: lay it out and measure its height so the plot always starts
+  // below the last wrapped row instead of colliding with it on narrow screens.
+  const name0 = (groupLabels && groupLabels[0]) || 'Group 0';
+  const name1 = (groupLabels && groupLabels[1]) || 'Group 1';
+  const legend = [
+    [p.accent, name0 + ' TPR'],
+    [p.clay, name1 + ' TPR'],
+    [p.blue, name0 + ' FNR'],
+    [p.gold, name1 + ' FNR']
+  ];
+  ctx.font = '10px ' + getComputedStyle(document.body).fontFamily;
+  const maxLx = w - 8;
+  let lx = 42;
+  let ly = 13;
+  let legendBottom = ly + 7;
+  const legendItems = [];
+  legend.forEach(([color, label]) => {
+    const labelWidth = ctx.measureText(label).width;
+    if (lx + 18 + labelWidth + 10 > maxLx) { lx = 42; ly += 14; }
+    legendItems.push({ color, label, x: lx, y: ly });
+    legendBottom = ly + 7;
+    lx += 18 + labelWidth + 18;
+  });
+
+  const m = { l: 42, r: 16, t: legendBottom + 10, b: 42 };
+  const pw = w - m.l - m.r;
+  const ph = h - m.t - m.b;
+  // The x axis is categorical (one slot per policy): numeric 0-1 ticks would
+  // be meaningless, so only y ticks are drawn.
+  axes(ctx, m.l, m.t, pw, ph, p, [], ticks());
+
   const groupW = pw / shown.length;
   const barW = Math.min(28, (groupW - 20) / 4);
   const colors = [p.accent, p.clay, p.blue, p.gold];
   const entries = [];
+  const ciText = (ci) => ci ? ' (95% CI ' + (ci.lo * 100).toFixed(0) + '-' + (ci.hi * 100).toFixed(0) + '%)' : '';
 
   shown.forEach((strategy, si) => {
     const g = strategy.metrics.groups;
     const base = m.l + si * groupW + groupW / 2;
-    const vals = [
-      g.groupA.tpr, g.groupB.tpr,
-      g.groupA.fnr, g.groupB.fnr
-    ];
+    const vals = [g.groupA.tpr, g.groupB.tpr, g.groupA.fnr, g.groupB.fnr];
+    const cis = [g.groupA.tprCi, g.groupB.tprCi, g.groupA.fnrCi, g.groupB.fnrCi];
     vals.forEach((v, vi) => {
       const gx = base + (vi - 1.5) * (barW + 4);
       const gy = m.t + (1 - v) * ph;
@@ -252,49 +279,41 @@ export function drawDisparity(canvas, strategies, groupLabels) {
       ctx.globalAlpha = vi < 2 ? 1 : 0.55;
       ctx.fillRect(gx - barW / 2, gy, barW, m.t + ph - gy);
       ctx.globalAlpha = 1;
-      const names = ['TPR group 0', 'TPR group 1', 'FNR group 0', 'FNR group 1'];
-      const groupNames = [(groupLabels && groupLabels[0]) || 'Group 0', (groupLabels && groupLabels[1]) || 'Group 1'];
       entries.push({
         x: gx,
         y: gy + (m.t + ph - gy) / 2,
-        label: strategy.label + ' - ' + (vi < 2 ? 'TPR ' : 'FNR ') + groupNames[vi % 2] + ': ' +
-          (v * 100).toFixed(1) + '% (' + names[vi] + ')'
+        label: strategy.label + ' - ' + (vi < 2 ? 'TPR ' : 'FNR ') + [name0, name1][vi % 2] + ': ' +
+          (v * 100).toFixed(1) + '%' + ciText(cis[vi])
       });
     });
+    // Strategy names wrap onto two short lines when they are wider than their
+    // slot, so neighbours never collide on narrow canvases.
+    const short = strategy.id.replace('equal-', 'eq-').replace('proxy-removal', 'no-proxy').replace('baseline', 'global');
+    const parts = short.split('-');
+    const lines = parts.length > 1 && ctx.measureText(short).width > groupW - 8
+      ? [parts[0] + '-', parts.slice(1).join('-')]
+      : [short];
     ctx.fillStyle = p.soft;
     ctx.font = '10px ' + getComputedStyle(document.body).fontFamily;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
-    const short = strategy.id.replace('equal-', 'eq-').replace('proxy-removal', 'no-proxy').replace('baseline', 'global');
-    ctx.fillText(short, base, m.t + ph + 8);
+    lines.forEach((line, li) => ctx.fillText(line, base, m.t + ph + 8 + li * 11));
   });
+  ctx.fillStyle = p.faint;
+  ctx.fillText('policy', m.l + pw / 2, h - 4);
 
-  // Legend.
-  const legend = [
-    [p.accent, (groupLabels && groupLabels[0]) || 'Group 0 TPR'],
-    [p.clay, (groupLabels && groupLabels[1]) || 'Group 1 TPR'],
-    [p.blue, 'Group 0 FNR'],
-    [p.gold, 'Group 1 FNR']
-  ];
-  let lx = m.l;
-  let ly = 13;
-  const maxLx = w - 8;
-  legend.forEach(([color, label]) => {
-    ctx.font = '10px ' + getComputedStyle(document.body).fontFamily;
-    const labelWidth = ctx.measureText(label).width;
-    if (lx + 18 + labelWidth + 10 > maxLx) { lx = m.l; ly += 14; }
-    ctx.fillStyle = color;
-    ctx.fillRect(lx, ly - 5, 10, 10);
+  for (const item of legendItems) {
+    ctx.fillStyle = item.color;
+    ctx.fillRect(item.x, item.y - 5, 10, 10);
     ctx.fillStyle = p.faint;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    ctx.fillText(label, lx + 15, ly);
-    lx += 18 + labelWidth + 18;
-  });
+    ctx.fillText(item.label, item.x + 15, item.y);
+  }
   bindTooltip(canvas, entries);
 }
 
-/** Training loss curve. */
+/** Training loss curve, labelled in real units (epochs and loss value). */
 export function drawLoss(canvas, losses) {
   const s = setup(canvas);
   if (!s) return;
@@ -302,11 +321,18 @@ export function drawLoss(canvas, losses) {
   const m = { l: 48, r: 16, t: 16, b: 30 };
   const pw = w - m.l - m.r;
   const ph = h - m.t - m.b;
-  axes(ctx, m.l, m.t, pw, ph, p, ticks(4), ticks(4));
-  if (!losses || losses.length < 2) return;
-  const lo = Math.min(...losses);
-  const hi = Math.max(...losses);
+  const lo = losses && losses.length ? Math.min(...losses) : 0;
+  const hi = losses && losses.length ? Math.max(...losses) : 1;
   const span = hi - lo || 1;
+  // x ticks are epochs (the curve samples every 10), y ticks are loss values.
+  const xTicks = ticks(4).map((t) => ({ v: t.v, label: String(Math.round(t.v * ((losses ? losses.length : 1) - 1) * 10)) }));
+  const yTicks = ticks(4).map((t) => ({ v: t.v, label: (lo + t.v * span).toFixed(2) }));
+  axes(ctx, m.l, m.t, pw, ph, p, xTicks, yTicks);
+  ctx.fillStyle = p.faint;
+  ctx.font = '10px ' + getComputedStyle(document.body).fontFamily;
+  ctx.textAlign = 'center';
+  ctx.fillText('epoch', m.l + pw / 2, h - 4);
+  if (!losses || losses.length < 2) return;
   ctx.beginPath();
   losses.forEach((v, i) => {
     const px = m.l + (i / (losses.length - 1)) * pw;
@@ -317,9 +343,4 @@ export function drawLoss(canvas, losses) {
   ctx.strokeStyle = p.accent;
   ctx.lineWidth = 2;
   ctx.stroke();
-  ctx.fillStyle = p.faint;
-  ctx.font = '10px ' + getComputedStyle(document.body).fontFamily;
-  ctx.textAlign = 'center';
-  ctx.fillText('epoch 0', m.l + 16, h - 3);
-  ctx.fillText('epoch ' + (losses.length - 1) * 10, m.l + pw - 18, h - 3);
 }

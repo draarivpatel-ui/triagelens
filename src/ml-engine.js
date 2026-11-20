@@ -318,7 +318,9 @@ function standardize(rows, keys) {
 }
 
 function standardizeOne(row, stats) {
-  return stats.map((s) => (row[s.key] - s.mean) / s.sd);
+  // Missing or non-numeric features are mean-imputed (z = 0) so a partial row
+  // never produces a NaN probability.
+  return stats.map((s) => (sanitizeNumber(row && row[s.key], s.mean) - s.mean) / s.sd);
 }
 
 /** Full batch gradient descent on L2 regularized log loss. */
@@ -528,8 +530,17 @@ export function rocAuc(scores, ys) {
 }
 
 export function brierScore(scores, ys) {
-  if (!scores.length) return 0;
-  return scores.reduce((s, p, i) => s + (p - ys[i]) ** 2, 0) / scores.length;
+  const ss = Array.isArray(scores) ? scores : [];
+  const yy = Array.isArray(ys) ? ys : [];
+  const n = Math.min(ss.length, yy.length);
+  if (!n) return 0;
+  let s = 0;
+  for (let i = 0; i < n; i++) {
+    const p = sanitizeNumber(ss[i], 0);
+    const y = yy[i] ? 1 : 0;
+    s += (p - y) ** 2;
+  }
+  return s / n;
 }
 
 /**
@@ -607,10 +618,11 @@ export function expectedCalibrationError(scores, ys, bins = 10) {
 }
 
 export function reliabilityDiagram(scores, ys, bins = 10) {
-  return binStats(scores, ys, bins).map((g, b) => ({
+  const bb = Number.isFinite(bins) && bins > 0 ? Math.floor(bins) : 10;
+  return binStats(scores, ys, bb).map((g, b) => ({
     bin: b,
-    lo: b / bins,
-    hi: (b + 1) / bins,
+    lo: b / bb,
+    hi: (b + 1) / bb,
     n: g.n,
     confidence: g.n ? g.conf / g.n : 0,
     observed: g.n ? g.acc / g.n : 0
@@ -694,10 +706,11 @@ export function overallMetrics(scores, ys, threshold) {
 }
 
 export function subgroupMetrics(rows, scores, threshold, subgroupKey) {
+  const rr = Array.isArray(rows) ? rows : [];
+  const ids = computeGroupIds(rr, subgroupKey);
   const byGroup = new Map();
-  const nRows = rows ? rows.length : 0;
-  for (let i = 0; i < nRows; i++) {
-    const g = Number.isFinite(rows[i][subgroupKey]) ? (rows[i][subgroupKey] | 0) : 0;
+  for (let i = 0; i < rr.length; i++) {
+    const g = ids[i];
     if (!byGroup.has(g)) byGroup.set(g, []);
     byGroup.get(g).push(i);
   }
@@ -705,7 +718,7 @@ export function subgroupMetrics(rows, scores, threshold, subgroupKey) {
   for (const [g, idx] of byGroup) {
     const s = { n: idx.length, positives: 0, selected: 0, tp: 0, fp: 0, tn: 0, fn: 0, conf: 0, acc: 0 };
     for (const i of idx) {
-      const y = ysAt(rows, i) ? 1 : 0;
+      const y = ysAt(rr, i) ? 1 : 0;
       const sc = sanitizeNumber(scores && scores[i], 0);
       const pred = sc >= threshold ? 1 : 0;
       s.positives += y;
@@ -727,6 +740,9 @@ export function subgroupMetrics(rows, scores, threshold, subgroupKey) {
       fpr: (s.n - s.positives) > 0 ? s.fp / (s.n - s.positives) : 0,
       ppv: s.tp + s.fp ? s.tp / (s.tp + s.fp) : 0,
       npv: s.tn + s.fn ? s.tn / (s.tn + s.fn) : 0,
+      tprCi: wilsonInterval(s.tp, s.positives),
+      fnrCi: wilsonInterval(s.fn, s.positives),
+      selectionCi: wilsonInterval(s.selected, s.n),
       calibrationError: safeDiv(Math.abs(s.acc - s.conf), s.n, 0),
       counts: { tp: s.tp, fp: s.fp, tn: s.tn, fn: s.fn }
     };
@@ -742,27 +758,54 @@ export function fairnessSummary(groups, subgroupKey) {
   const ids = Object.keys(groups).map(Number).sort((a, b) => a - b);
   if (ids.length === 0) {
     const empty = { n: 0, positives: 0, prevalence: 0, selectionRate: 0, tpr: 0, fnr: 0, fpr: 0, ppv: 0, npv: 0, calibrationError: 0, counts: { tp: 0, fp: 0, tn: 0, fn: 0 } };
-    return { subgroupKey, groups: [], groupA: empty, groupB: empty, demographicParityGap: 0, equalOpportunityGap: 0, equalOpportunityGapRatio: 0, fnrDisparity: 0, fnrRatio: 1, ppvDisparity: 0, npvDisparity: 0, subgroupCalibrationGap: 0 };
+    return { subgroupKey, groups: [], groupA: empty, groupB: empty, demographicParityGap: 0, equalOpportunityGap: 0, equalOpportunityGapRatio: 0, fnrDisparity: 0, fnrRatio: 1, fprDisparity: 0, ppvDisparity: 0, npvDisparity: 0, subgroupCalibrationGap: 0 };
   }
   const a = groups[ids[0]];
   const b = ids.length > 1 ? groups[ids[ids.length - 1]] : groups[ids[0]];
-  const maxSel = Math.max(a.selectionRate, b.selectionRate);
-  const maxTpr = Math.max(a.tpr, b.tpr);
-  const maxFnr = Math.max(a.fnr, b.fnr);
+  // Disparities are the worst gap across every pair of groups, so a third or
+  // further subgroup can never sit invisibly between the two displayed
+  // extremes. With two groups this reduces to |a - b| exactly.
+  const maxPair = (f) => {
+    let m = 0;
+    for (const i of ids) for (const j of ids) m = Math.max(m, Math.abs((f(groups[i]) || 0) - (f(groups[j]) || 0)));
+    return m;
+  };
+  const maxSel = Math.max(...ids.map((i) => groups[i].selectionRate));
+  const maxTpr = Math.max(...ids.map((i) => groups[i].tpr));
+  const maxFnr = Math.max(...ids.map((i) => groups[i].fnr));
+  const minFnr = Math.min(...ids.map((i) => groups[i].fnr));
   return {
     subgroupKey,
     groups: ids,
     groupA: a,
     groupB: b,
-    demographicParityGap: maxSel > 0 ? Math.abs(a.selectionRate - b.selectionRate) / maxSel : 0,
-    equalOpportunityGap: Math.abs(a.tpr - b.tpr),
-    equalOpportunityGapRatio: maxTpr > 0 ? Math.abs(a.tpr - b.tpr) / maxTpr : 0,
-    fnrDisparity: Math.abs(a.fnr - b.fnr),
-    fnrRatio: maxFnr > 0 ? safeDiv(Math.min(a.fnr, b.fnr), maxFnr, 1) : 1,
-    ppvDisparity: Math.abs((a.ppv || 0) - (b.ppv || 0)),
-    npvDisparity: Math.abs((a.npv || 0) - (b.npv || 0)),
-    subgroupCalibrationGap: Math.abs(a.calibrationError - b.calibrationError)
+    demographicParityGap: maxSel > 0 ? maxPair((g) => g.selectionRate) / maxSel : 0,
+    equalOpportunityGap: maxPair((g) => g.tpr),
+    equalOpportunityGapRatio: maxTpr > 0 ? maxPair((g) => g.tpr) / maxTpr : 0,
+    fnrDisparity: maxPair((g) => g.fnr),
+    fnrRatio: maxFnr > 0 ? safeDiv(minFnr, maxFnr, 1) : 1,
+    fprDisparity: maxPair((g) => g.fpr),
+    ppvDisparity: maxPair((g) => g.ppv),
+    npvDisparity: maxPair((g) => g.npv),
+    subgroupCalibrationGap: maxPair((g) => g.calibrationError)
   };
+}
+
+/**
+ * Wilson score interval for a binomial rate (z = 1.96 gives a 95% CI). The
+ * honest uncertainty band around a subgroup metric when the group is small:
+ * better behaved than the normal approximation near 0 and 1 (Newcombe, 1998).
+ */
+export function wilsonInterval(successes, n, z = 1.96) {
+  const nn = Number.isFinite(n) ? n : 0;
+  if (nn <= 0) return { lo: 0, hi: 1 };
+  const k = Math.min(Math.max(sanitizeNumber(successes, 0), 0), nn);
+  const z2 = z * z;
+  const p = k / nn;
+  const denom = 1 + z2 / nn;
+  const center = (p + z2 / (2 * nn)) / denom;
+  const half = (z / denom) * Math.sqrt((p * (1 - p) + z2 / (4 * nn)) / nn);
+  return { lo: Math.max(0, center - half), hi: Math.min(1, center + half) };
 }
 
 /* ------------------------------------------------------------------ */
@@ -849,38 +892,112 @@ function tprAt(indices, rows, scores, t) {
   return positives ? tp / positives : 0;
 }
 
+function fprAt(indices, rows, scores, t) {
+  let fp = 0;
+  let negatives = 0;
+  for (const i of indices) {
+    if (rows[i] && !rows[i].y) {
+      negatives++;
+      if (sanitizeNumber(scores && scores[i], 0) >= t) fp++;
+    }
+  }
+  return negatives ? fp / negatives : 0;
+}
+
+function ratesAt(indices, rows, scores, t) {
+  let tp = 0;
+  let fp = 0;
+  let pos = 0;
+  let neg = 0;
+  for (const i of indices) {
+    const y = rows[i] && rows[i].y ? 1 : 0;
+    if (y) pos++; else neg++;
+    if (sanitizeNumber(scores && scores[i], 0) >= t) (y ? tp++ : fp++);
+  }
+  return { tpr: pos ? tp / pos : 0, fpr: neg ? fp / neg : 0, tp, fp, pos, neg };
+}
+
 /**
  * Choose the threshold closest to a reference that attains the requested TPR
- * on the fitting rows. Candidate cut points are the group's own scores plus the
- * boundaries between them, so a target TPR is reachable even when probabilities
- * are tightly clustered after calibration.
+ * on the fitting rows. Candidate cut points are every distinct positive score
+ * (plus the points just around each) and the reference itself, so any reachable
+ * TPR is attainable with score-precision accuracy.
+ *
+ * Pareto-safety guard, two principled checks:
+ *  - Distribution check: if the group's own scores separate positives from
+ *    negatives at or below the chance line (group-level Mann-Whitney AUC
+ *    <= 0.5, i.e. an inverted or non-informative subgroup distribution), no
+ *    threshold move can be informative. The group keeps the global reference
+ *    threshold and the caller is told via `guard` instead of buying parity
+ *    with a false-positive explosion.
+ *  - Operating-point check: any candidate that lands on or below the chance
+ *    line (TPR <= FPR) is rejected, so a mitigated point never classifies a
+ *    group at lottery level or worse.
+ * A sub-threshold lift on a healthy distribution is always majority-negative
+ * in raw counts (that is the inherent price of equal opportunity) so the
+ * guard deliberately does not police band composition; instead any FPR cost
+ * is surfaced by the trade-off note and Wilson intervals.
+ * When the guard caps a move the `guard` field reports the wanted and capped
+ * thresholds so the trade-off note can surface it honestly.
  */
 function thresholdForTpr(indices, rows, scores, goal, reference) {
   const positives = indices.filter((i) => rows[i] && rows[i].y).map((i) => sanitizeNumber(scores[i],0)).sort((a, b) => a - b);
-  if (!positives.length) return reference;
-  const targetCount = Math.round(goal * positives.length);
-  // Candidate cut points: below each relevant positive score and above it, so
-  // both sides of the target TPR are reachable with score-precision accuracy.
-  const candidates = [reference];
-  for (const count of [targetCount - 1, targetCount, targetCount + 1]) {
-    const c = Math.max(0, Math.min(positives.length - 1, positives.length - count));
-    const at = positives[c];
-    candidates.push(at, Math.max(0, at - 1e-7), Math.min(1, at + 1e-7));
+  if (!positives.length) return { t: reference, guard: null };
+  const groupScores = indices.map((i) => sanitizeNumber(scores[i], 0));
+  const groupYs = indices.map((i) => (rows[i] && rows[i].y ? 1 : 0));
+  const groupAuc = rocAuc(groupScores, groupYs);
+  if (!(groupAuc > 0.5 + 1e-9)) {
+    const r = ratesAt(indices, rows, scores, reference);
+    return {
+      t: reference,
+      guard: {
+        wanted: null,
+        capped: reference,
+        achievedTpr: r.tpr,
+        achievedFpr: r.fpr,
+        reason: 'group score AUC ' + groupAuc.toFixed(3) + ' is at or below the chance line'
+      }
+    };
   }
-  let best = reference;
-  let bestCost = Infinity;
-  for (const t of candidates) {
-    const tpr = tprAt(indices, rows, scores, t);
+  const candidates = new Set([reference]);
+  for (const at of positives) {
+    candidates.add(at);
+    candidates.add(Math.max(0, at - 1e-7));
+    candidates.add(Math.min(1, at + 1e-7));
+  }
+  const feasible = (t) => {
+    if (t === reference) return true;
+    const r = ratesAt(indices, rows, scores, t);
+    return r.tpr > r.fpr + 1e-3;
+  };
+  const cost = (t) => {
+    const tpr = ratesAt(indices, rows, scores, t).tpr;
     const shortfall = Math.max(0, goal - tpr);
     const excess = Math.max(0, tpr - goal);
     // Missing the target TPR (leveling down) costs much more than overshooting.
-    const cost = 10 * shortfall + excess + 0.00005 * Math.abs(t - reference);
-    if (cost < bestCost - 1e-12) {
-      bestCost = cost;
-      best = t;
+    return 10 * shortfall + excess + 0.00005 * Math.abs(t - reference);
+  };
+  const pick = (pred) => {
+    let best = reference;
+    let bestCost = Infinity;
+    for (const t of candidates) {
+      if (!pred(t)) continue;
+      const c = cost(t);
+      if (c < bestCost - 1e-12) {
+        bestCost = c;
+        best = t;
+      }
     }
+    return best;
+  };
+  const unconstrained = pick(() => true);
+  const best = pick(feasible);
+  let guard = null;
+  if (Math.abs(best - unconstrained) > 1e-12) {
+    const got = ratesAt(indices, rows, scores, best);
+    guard = { wanted: unconstrained, capped: best, achievedTpr: got.tpr, achievedFpr: got.fpr };
   }
-  return best;
+  return { t: best, guard };
 }
 
 function selectionAt(indices, scores, t) {
@@ -889,12 +1006,39 @@ function selectionAt(indices, scores, t) {
   return indices.length ? selected / indices.length : 0;
 }
 
+/**
+ * Map each row to a stable integer group id. Finite numeric keys keep their
+ * (truncated) value. Non-numeric keys, including CSV-style string labels such
+ * as 'rural', get fresh ids above the largest numeric id in first-appearance
+ * order, so string-labeled subgroups form real groups instead of silently
+ * collapsing into group 0.
+ */
+function computeGroupIds(rows, subgroupKey) {
+  const ids = new Array(rows.length);
+  let maxNum = -1;
+  for (let i = 0; i < rows.length; i++) {
+    const raw = rows[i] ? rows[i][subgroupKey] : undefined;
+    if (Number.isFinite(raw)) maxNum = Math.max(maxNum, raw | 0);
+  }
+  const extra = new Map();
+  for (let i = 0; i < rows.length; i++) {
+    const raw = rows[i] ? rows[i][subgroupKey] : undefined;
+    if (Number.isFinite(raw)) {
+      ids[i] = raw | 0;
+      continue;
+    }
+    if (!extra.has(raw)) extra.set(raw, maxNum + 1 + extra.size);
+    ids[i] = extra.get(raw);
+  }
+  return ids;
+}
+
 /** Map a subgroup key to the fitting-row indices for each group. */
 function groupIndices(rows, subgroupKey) {
+  const ids = computeGroupIds(rows, subgroupKey);
   const byGroup = new Map();
   for (let i = 0; i < rows.length; i++) {
-    const raw = rows[i] ? rows[i][subgroupKey] : 0;
-    const g = Number.isFinite(raw) ? (raw | 0) : 0;
+    const g = ids[i];
     if (!byGroup.has(g)) byGroup.set(g, []);
     byGroup.get(g).push(i);
   }
@@ -943,8 +1087,13 @@ export function fitGroupThresholds(rows, scores, options = {}) {
     ...ids.map((g) => tprAt(byGroup.get(g), rows, scores, perGroup[g]))
   );
   const thresholds = {};
-  for (const g of ids) thresholds[g] = thresholdForTpr(byGroup.get(g), rows, scores, goal, reference);
-  return { thresholds, goal, perGroup };
+  const guards = {};
+  for (const g of ids) {
+    const res = thresholdForTpr(byGroup.get(g), rows, scores, goal, reference);
+    thresholds[g] = res.t;
+    if (res.guard) guards[g] = res.guard;
+  }
+  return { thresholds, goal, perGroup, guards };
 }
 
 export function optimizeGroupThresholds(rows, scores, options = {}) {
@@ -1017,6 +1166,21 @@ export function tradeoffNotes(audit) {
     if (dp > 0.0005) changes.push('selection-rate gap +' + pp(dp));
     const fnr = m.groups.fnrDisparity - base.groups.fnrDisparity;
     if (fnr > 0.0005) changes.push('FNR gap +' + pp(fnr));
+    const fpr = m.groups.fprDisparity - base.groups.fprDisparity;
+    if (fpr > 0.0005) changes.push('FPR gap +' + pp(fpr));
+    // Honest flag when the Pareto-safety guard capped a group's lift: the
+    // cost of full parity is reported, never hidden.
+    if (s.id === 'equal-opportunity') {
+      const guards = (audit.fitting && audit.fitting.eoGuards) || {};
+      const names = Object.keys(guards).map((g) => (audit.groupLabels && audit.groupLabels[g]) || 'group ' + g);
+      const aucBlocked = Object.keys(guards).filter((g) => guards[g] && guards[g].reason);
+      const capped = names.filter((n, i) => !aucBlocked.includes(Object.keys(guards)[i]));
+      if (capped.length) changes.push('lift safety cap kept ' + capped.join(' and ') + ' inside its informative score band');
+      if (aucBlocked.length) {
+        const bnames = aucBlocked.map((g) => (audit.groupLabels && audit.groupLabels[g]) || 'group ' + g);
+        changes.push('no informative threshold move for ' + bnames.join(' and ') + ' (score distribution at or below chance); threshold kept at global');
+      }
+    }
     if (changes.length) out.push({ label: s.label, changes });
   }
   return out;
@@ -1036,17 +1200,18 @@ function metricsWithGroups(rows, scores, threshold, subgroupKey) {
   };
 }
 
-function strategyWithThresholds(id, label, blurb, rows, scores, thresholds, subgroupKey, scenario) {
+function strategyWithThresholds(id, label, blurb, rows, scores, thresholds, subgroupKey, scenario, reference) {
   const rr = Array.isArray(rows) ? rows : [];
   const ss = Array.isArray(scores) ? scores : [];
   const ys = rr.map((r) => (r && r.y ? 1 : 0));
+  const fallback = Number.isFinite(reference) ? reference : 0.5;
+  const ids = computeGroupIds(rr, subgroupKey);
   const counts = { tp: 0, fp: 0, tn: 0, fn: 0 };
   const groups = {};
   for (let i = 0; i < rr.length; i++) {
-    const raw = rr[i] ? rr[i][subgroupKey] : 0;
-    const g = Number.isFinite(raw) ? (raw | 0) : 0;
+    const g = ids[i];
     const sc = sanitizeNumber(ss[i], 0);
-    const th = (thresholds && thresholds[g] != null) ? thresholds[g] : 0.5;
+    const th = (thresholds && thresholds[g] != null) ? thresholds[g] : fallback;
     const pred = sc >= th ? 1 : 0;
     if (pred && ys[i]) counts.tp++;
     else if (pred) counts.fp++;
@@ -1076,12 +1241,15 @@ function strategyWithThresholds(id, label, blurb, rows, scores, thresholds, subg
       fpr: s.n - s.positives ? s.fp / (s.n - s.positives) : 0,
       ppv: s.tp + s.fp ? s.tp / (s.tp + s.fp) : 0,
       npv: s.tn + s.fn ? s.tn / (s.tn + s.fn) : 0,
+      tprCi: wilsonInterval(s.tp, s.positives),
+      fnrCi: wilsonInterval(s.fn, s.positives),
+      selectionCi: wilsonInterval(s.selected, s.n),
       calibrationError: safeDiv(Math.abs(s.acc - s.conf), s.n, 0),
       counts: { tp: s.tp, fp: s.fp, tn: s.tn, fn: s.fn }
     };
   }
   const overall = classMetrics(counts);
-  const preds = rr.map((r, i) => { const raw = r ? r[subgroupKey] : 0; const g = Number.isFinite(raw) ? (raw | 0) : 0; const th = (thresholds && thresholds[g] != null) ? thresholds[g] : 0.5; return (sanitizeNumber(ss[i],0) >= th ? 1 : 0); });
+  const preds = rr.map((r, i) => { const g = ids[i]; const th = (thresholds && thresholds[g] != null) ? thresholds[g] : fallback; return (sanitizeNumber(ss[i],0) >= th ? 1 : 0); });
   return {
     id,
     label,
@@ -1176,7 +1344,7 @@ export function runAudit(options = {}) {
     'equal-opportunity',
     'Equal opportunity mitigation',
     'Group-specific thresholds fitted on calibrated training scores lift every group toward the higher training TPR at the global threshold (Hardt et al., 2016).',
-    test, calTest, eoThresholds, subgroupKey, scenario
+    test, calTest, eoThresholds, subgroupKey, scenario, threshold
   );
 
   const { target: selTarget } = selectionTargetFromTrain(train, calTrain, threshold, subgroupKey);
@@ -1185,7 +1353,7 @@ export function runAudit(options = {}) {
     'equal-selection',
     'Selection rate mitigation',
     'Group specific thresholds chosen to bring demographic parity closer to zero.',
-    test, calTest, selThresholds, subgroupKey, scenario
+    test, calTest, selThresholds, subgroupKey, scenario, threshold
   );
 
   const proxyKeys = featureKeys.filter((k) => k !== scenario.proxyKey);
@@ -1336,6 +1504,7 @@ export function runAudit(options = {}) {
       selectionTarget: selTarget,
       eoGoalTpr: eoFit.goal,
       eoPerGroupThreshold: eoFit.perGroup,
+      eoGuards: eoFit.guards || {},
       space: 'calibrated-train'
     },
     strategies,
@@ -1377,7 +1546,9 @@ export function parseCsv(text) {
       }
       field += ch; i++; continue;
     }
-    if (ch === '"') { inQuotes = true; atFieldStart = true; i++; continue; }
+    // RFC 4180: a quote is special only at the start of a field. A bare quote
+    // mid-field is literal text, not a mode switch.
+    if (ch === '"' && atFieldStart) { inQuotes = true; atFieldStart = false; i++; continue; }
     if (ch === ',') { pushField(); i++; continue; }
     if (ch === '\n') { pushField(); pushRow(); i++; continue; }
     if (ch === '\r') { if (input[i + 1] === '\n') { i++; continue; } pushField(); pushRow(); i++; continue; }
@@ -1390,8 +1561,19 @@ export function parseCsv(text) {
   // Remove completely empty trailing rows
   while (records.length && records[records.length - 1].length === 1 && records[records.length - 1][0] === '' && records.length > 1) records.pop();
 
-  if (!records.length) return { headers: [], rows: [], skipped: 0 };
-  const headers = records[0].map((h) => String(h).trim());
+  if (!records.length) return { headers: [], rows: [], skipped: 0, duplicates: [] };
+  const rawHeaders = records[0].map((h) => String(h).trim());
+  // Duplicate headers get deterministic suffixes so no column's data is lost,
+  // and the collision is reported instead of merged silently.
+  const seen = new Map();
+  const duplicates = [];
+  const headers = rawHeaders.map((h) => {
+    const count = seen.get(h) || 0;
+    seen.set(h, count + 1);
+    if (!count) return h;
+    if (count === 1) duplicates.push(h);
+    return h + '__' + (count + 1);
+  });
   const rows = [];
   let skipped = 0;
   for (let r = 1; r < records.length; r++) {
@@ -1399,18 +1581,18 @@ export function parseCsv(text) {
     if (rec.length === 1 && rec[0] === '') continue;
     if (rec.length !== headers.length) { skipped++; continue; }
     const obj = {};
-    let valid = true;
     headers.forEach((h, j) => {
       const raw = rec[j];
       const trimmed = String(raw).trim();
-      if (trimmed === '') { obj[h] = null; return; }
-      const num = Number(trimmed);
-      if (Number.isFinite(num) && trimmed !== '') obj[h] = num;
-      else obj[h] = trimmed;
+      const v = trimmed === '' ? null
+        : (Number.isFinite(Number(trimmed)) ? Number(trimmed) : trimmed);
+      // Object key '__proto__' cannot be assigned directly; keep the data.
+      if (h === '__proto__') Object.defineProperty(obj, h, { value: v, enumerable: true, writable: true, configurable: true });
+      else obj[h] = v;
     });
     rows.push(obj);
   }
-  return { headers, rows, skipped };
+  return { headers, rows, skipped, duplicates };
 }
 
 /** Validate parsed rows: required keys present and probabilities in [0, 1]. */
@@ -1463,6 +1645,7 @@ export function exportAudit(audit) {
     dp_gap: s.metrics.groups.demographicParityGap,
     eo_gap: s.metrics.groups.equalOpportunityGap,
     fnr_gap: s.metrics.groups.fnrDisparity,
+    fpr_gap: s.metrics.groups.fprDisparity,
     ppv_gap: s.metrics.groups.ppvDisparity,
     npv_gap: s.metrics.groups.npvDisparity
   }));
