@@ -51,20 +51,35 @@ function sigmoid(z) {
 }
 
 function clamp(x, lo, hi) {
+  if (!Number.isFinite(x)) return lo;
   return x < lo ? lo : x > hi ? hi : x;
 }
 
+export function safeDiv(a, b, fallback = 0) {
+  if (!Number.isFinite(a) || !Number.isFinite(b) || b === 0) return fallback;
+  const v = a / b;
+  return Number.isFinite(v) ? v : fallback;
+}
+
+export function sanitizeNumber(x, fallback = 0) {
+  if (x === null || x === undefined) return fallback;
+  const n = Number(x);
+  return Number.isFinite(n) ? n : fallback;
+}
+
 function mean(xs) {
+  if (!xs || !xs.length) return 0;
   let s = 0;
-  for (const x of xs) s += x;
-  return xs.length ? s / xs.length : 0;
+  for (const x of xs) s += sanitizeNumber(x, 0);
+  return s / xs.length;
 }
 
 function stddev(xs) {
+  if (!xs || !xs.length) return 1;
   const m = mean(xs);
   let s = 0;
-  for (const x of xs) s += (x - m) * (x - m);
-  return Math.sqrt(s / Math.max(1, xs.length));
+  for (const x of xs) s += (sanitizeNumber(x, 0) - m) ** 2;
+  return Math.sqrt(s / Math.max(1, xs.length)) || 1;
 }
 
 function nowMs() {
@@ -293,11 +308,12 @@ export function generateDataset({
 /* ------------------------------------------------------------------ */
 
 function standardize(rows, keys) {
+  const rr = Array.isArray(rows) ? rows : [];
   const stats = keys.map((key) => {
-    const xs = rows.map((r) => r[key]);
+    const xs = rr.map((r) => (r && r[key] != null ? r[key] : 0));
     return { key, mean: mean(xs), sd: stddev(xs) || 1 };
   });
-  const z = rows.map((r) => keys.map((key, j) => (r[key] - stats[j].mean) / stats[j].sd));
+  const z = rr.map((r) => keys.map((key, j) => (sanitizeNumber(r && r[key], 0) - stats[j].mean) / (stats[j].sd || 1)));
   return { stats, z };
 }
 
@@ -308,23 +324,29 @@ function standardizeOne(row, stats) {
 /** Full batch gradient descent on L2 regularized log loss. */
 export function trainLogisticRegression(rows, options = {}) {
   const started = nowMs();
-  const keys = options.featureKeys || rows.keys || ['symptomSeverity', 'waitDays', 'hasProvider', 'ageYears'];
+  const rr = Array.isArray(rows) ? rows : [];
+  const keys = (options && options.featureKeys) || ['symptomSeverity', 'waitDays', 'hasProvider', 'ageYears'];
   const l2 = options.l2 ?? 0.02;
   const epochs = options.epochs ?? 120;
   const lr = options.lr ?? 0.35;
-  const { stats, z } = standardize(rows, keys);
+  const { stats, z } = standardize(rr, keys);
   const p = keys.length;
   const w = new Array(p).fill(0);
   let b = 0;
   const loss = [];
-  const n = rows.length;
+  const n = rr.length;
+  if (n === 0) {
+    const coefficients = {};
+    for (const k of keys) coefficients[k] = { raw: 0, standardized: 0, mean: 0, sd: 1 };
+    return { kind: 'logistic', keys: keys.slice(), l2, epochs, loss: [], coefficients, intercept: 0, predictProba: () => 0.5, ms: nowMs() - started };
+  }
   for (let e = 0; e < epochs; e++) {
     const gw = new Array(p).fill(0);
     let gb = 0;
     let logLoss = 0;
     for (let i = 0; i < n; i++) {
       const xi = z[i];
-      const yi = rows[i].y;
+      const yi = rr[i].y ? 1 : 0;
       let dot = b;
       for (let j = 0; j < p; j++) dot += w[j] * xi[j];
       const q = sigmoid(dot);
@@ -450,10 +472,15 @@ function collectRules(node) {
 
 export function trainDecisionTree(rows, options = {}) {
   const started = nowMs();
-  const keys = options.featureKeys || ['symptomSeverity', 'waitDays', 'hasProvider', 'ageYears'];
+  const rr = Array.isArray(rows) ? rows : [];
+  const keys = (options && options.featureKeys) || ['symptomSeverity', 'waitDays', 'hasProvider', 'ageYears'];
   const maxDepth = options.maxDepth ?? 3;
   const minLeaf = options.minLeaf ?? 24;
-  const tree = buildTree(rows, keys, 0, maxDepth, minLeaf);
+  if (!rr.length) {
+    const emptyTree = { leaf: true, n: 0, positives: 0, p: 0.5 };
+    return { kind: 'tree', keys: keys.slice(), tree: emptyTree, rules: [{ conditions: [], probability: 0.5, n: 0 }], leaves: 1, maxDepth, predictProba: () => 0.5, ms: nowMs() - started };
+  }
+  const tree = buildTree(rr, keys, 0, maxDepth, minLeaf);
   return {
     kind: 'tree',
     keys: keys.slice(),
@@ -472,10 +499,15 @@ export function trainDecisionTree(rows, options = {}) {
 /* Evaluation metrics                                                  */
 /* ------------------------------------------------------------------ */
 
-function rocAuc(scores, ys) {
+export function rocAuc(scores, ys) {
   const pos = [];
   const neg = [];
-  for (let i = 0; i < ys.length; i++) (ys[i] ? pos : neg).push(scores[i]);
+  const n = scores ? scores.length : 0;
+  for (let i = 0; i < n; i++) {
+    const y = ys && ys[i] ? 1 : 0;
+    const sc = sanitizeNumber(scores[i], 0);
+    (y ? pos : neg).push(sc);
+  }
   if (!pos.length || !neg.length) return 0.5;
   pos.sort((a, b) => a - b);
   neg.sort((a, b) => a - b);
@@ -490,35 +522,44 @@ function rocAuc(scores, ys) {
   return wins / (pos.length * neg.length);
 }
 
-function brierScore(scores, ys) {
+export function brierScore(scores, ys) {
   if (!scores.length) return 0;
   return scores.reduce((s, p, i) => s + (p - ys[i]) ** 2, 0) / scores.length;
 }
 
 function binIndex(score, bins) {
-  return clamp(Math.floor(score * bins), 0, bins - 1);
+  const v = sanitizeNumber(score, 0);
+  const b = Number.isFinite(bins) && bins > 0 ? Math.floor(v * bins) : 0;
+  return clamp(b, 0, Math.max(0, (bins || 1) - 1));
 }
 
-function binStats(scores, ys, bins) {
-  const buckets = Array.from({ length: bins }, () => ({ n: 0, conf: 0, acc: 0 }));
-  for (let i = 0; i < scores.length; i++) {
-    const g = buckets[binIndex(scores[i], bins)];
+export function binStats(scores, ys, bins) {
+  const bb = Number.isFinite(bins) && bins > 0 ? Math.floor(bins) : 10;
+  const buckets = Array.from({ length: bb }, () => ({ n: 0, conf: 0, acc: 0 }));
+  const n = scores ? scores.length : 0;
+  for (let i = 0; i < n; i++) {
+    const sc = sanitizeNumber(scores[i], 0);
+    const y = sanitizeNumber(ys && ys[i], 0) ? 1 : 0;
+    const idx = binIndex(sc, bb);
+    const g = buckets[idx];
     g.n++;
-    g.conf += scores[i];
-    g.acc += ys[i];
+    g.conf += sc;
+    g.acc += y;
   }
   return buckets;
 }
 
-function expectedCalibrationError(scores, ys, bins = 10) {
-  if (!scores.length) return 0;
-  return binStats(scores, ys, bins).reduce(
-    (ece, g) => ece + (g.n / scores.length) * (g.n ? Math.abs(g.acc - g.conf) / g.n : 0),
+export function expectedCalibrationError(scores, ys, bins = 10) {
+  const n = scores ? scores.length : 0;
+  if (!n || !ys || !ys.length) return 0;
+  const bb = Number.isFinite(bins) && bins > 0 ? Math.floor(bins) : 10;
+  return binStats(scores, ys, bb).reduce(
+    (ece, g) => ece + (g.n / n) * (g.n ? Math.abs(g.acc - g.conf) / g.n : 0),
     0
   );
 }
 
-function reliabilityDiagram(scores, ys, bins = 10) {
+export function reliabilityDiagram(scores, ys, bins = 10) {
   return binStats(scores, ys, bins).map((g, b) => ({
     bin: b,
     lo: b / bins,
@@ -550,19 +591,23 @@ function rocCurve(scores, ys) {
   return pts;
 }
 
-function confusion(scores, ys, threshold) {
+export function confusion(scores, ys, threshold) {
   const c = { tp: 0, fp: 0, tn: 0, fn: 0 };
-  for (let i = 0; i < ys.length; i++) {
-    const pred = scores[i] >= threshold ? 1 : 0;
-    if (pred && ys[i]) c.tp++;
+  const n = Math.min(scores ? scores.length : 0, ys ? ys.length : 0);
+  const th = Number.isFinite(threshold) ? threshold : 0.5;
+  for (let i = 0; i < n; i++) {
+    const sc = sanitizeNumber(scores[i], 0);
+    const y = ys[i] ? 1 : 0;
+    const pred = sc >= th ? 1 : 0;
+    if (pred && y) c.tp++;
     else if (pred) c.fp++;
-    else if (ys[i]) c.fn++;
+    else if (y) c.fn++;
     else c.tn++;
   }
   return c;
 }
 
-function classMetrics(c) {
+export function classMetrics(c) {
   const precision = c.tp + c.fp ? c.tp / (c.tp + c.fp) : 0;
   const recall = c.tp + c.fn ? c.tp / (c.tp + c.fn) : 0;
   const specificity = c.tn + c.fp ? c.tn / (c.tn + c.fp) : 0;
@@ -579,8 +624,10 @@ function classMetrics(c) {
   };
 }
 
-function overallMetrics(scores, ys, threshold) {
-  const c = classMetrics(confusion(scores, ys, threshold));
+export function overallMetrics(scores, ys, threshold) {
+  const ss = Array.isArray(scores) ? scores : [];
+  const yy = Array.isArray(ys) ? ys : [];
+  const c = classMetrics(confusion(ss, yy, threshold));
   return {
     threshold,
     n: scores.length,
@@ -599,10 +646,11 @@ function overallMetrics(scores, ys, threshold) {
   };
 }
 
-function subgroupMetrics(rows, scores, threshold, subgroupKey) {
+export function subgroupMetrics(rows, scores, threshold, subgroupKey) {
   const byGroup = new Map();
-  for (let i = 0; i < rows.length; i++) {
-    const g = rows[i][subgroupKey] | 0;
+  const nRows = rows ? rows.length : 0;
+  for (let i = 0; i < nRows; i++) {
+    const g = Number.isFinite(rows[i][subgroupKey]) ? (rows[i][subgroupKey] | 0) : 0;
     if (!byGroup.has(g)) byGroup.set(g, []);
     byGroup.get(g).push(i);
   }
@@ -610,11 +658,12 @@ function subgroupMetrics(rows, scores, threshold, subgroupKey) {
   for (const [g, idx] of byGroup) {
     const s = { n: idx.length, positives: 0, selected: 0, tp: 0, fp: 0, tn: 0, fn: 0, conf: 0, acc: 0 };
     for (const i of idx) {
-      const y = ysAt(rows, i);
-      const pred = scores[i] >= threshold ? 1 : 0;
+      const y = ysAt(rows, i) ? 1 : 0;
+      const sc = sanitizeNumber(scores && scores[i], 0);
+      const pred = sc >= threshold ? 1 : 0;
       s.positives += y;
       s.selected += pred;
-      s.conf += scores[i];
+      s.conf += sc;
       s.acc += y;
       if (pred && y) s.tp++;
       else if (pred) s.fp++;
@@ -624,12 +673,12 @@ function subgroupMetrics(rows, scores, threshold, subgroupKey) {
     groups[g] = {
       n: s.n,
       positives: s.positives,
-      prevalence: s.positives / s.n,
-      selectionRate: s.selected / s.n,
+      prevalence: safeDiv(s.positives, s.n, 0),
+      selectionRate: safeDiv(s.selected, s.n, 0),
       tpr: s.positives ? s.tp / s.positives : 0,
       fnr: s.positives ? s.fn / s.positives : 0,
-      fpr: s.n - s.positives ? s.fp / (s.n - s.positives) : 0,
-      calibrationError: Math.abs(s.acc - s.conf) / s.n,
+      fpr: (s.n - s.positives) > 0 ? s.fp / (s.n - s.positives) : 0,
+      calibrationError: safeDiv(Math.abs(s.acc - s.conf), s.n, 0),
       counts: { tp: s.tp, fp: s.fp, tn: s.tn, fn: s.fn }
     };
   }
@@ -637,13 +686,17 @@ function subgroupMetrics(rows, scores, threshold, subgroupKey) {
 }
 
 function ysAt(rows, i) {
-  return rows[i].y;
+  return rows && rows[i] && rows[i].y ? 1 : 0;
 }
 
-function fairnessSummary(groups, subgroupKey) {
+export function fairnessSummary(groups, subgroupKey) {
   const ids = Object.keys(groups).map(Number).sort((a, b) => a - b);
+  if (ids.length === 0) {
+    const empty = { n: 0, positives: 0, prevalence: 0, selectionRate: 0, tpr: 0, fnr: 0, fpr: 0, calibrationError: 0, counts: { tp: 0, fp: 0, tn: 0, fn: 0 } };
+    return { subgroupKey, groups: [], groupA: empty, groupB: empty, demographicParityGap: 0, equalOpportunityGap: 0, equalOpportunityGapRatio: 0, fnrDisparity: 0, fnrRatio: 1, subgroupCalibrationGap: 0 };
+  }
   const a = groups[ids[0]];
-  const b = groups[ids[ids.length - 1]];
+  const b = ids.length > 1 ? groups[ids[ids.length - 1]] : groups[ids[0]];
   const maxSel = Math.max(a.selectionRate, b.selectionRate);
   const maxTpr = Math.max(a.tpr, b.tpr);
   const maxFnr = Math.max(a.fnr, b.fnr);
@@ -656,7 +709,7 @@ function fairnessSummary(groups, subgroupKey) {
     equalOpportunityGap: Math.abs(a.tpr - b.tpr),
     equalOpportunityGapRatio: maxTpr > 0 ? Math.abs(a.tpr - b.tpr) / maxTpr : 0,
     fnrDisparity: Math.abs(a.fnr - b.fnr),
-    fnrRatio: maxFnr > 0 ? Math.min(a.fnr, b.fnr) / maxFnr : 1,
+    fnrRatio: maxFnr > 0 ? safeDiv(Math.min(a.fnr, b.fnr), maxFnr, 1) : 1,
     subgroupCalibrationGap: Math.abs(a.calibrationError - b.calibrationError)
   };
 }
@@ -667,13 +720,19 @@ function fairnessSummary(groups, subgroupKey) {
 
 /** q = sigmoid(a * logit(p) + b). Temperature = 1 / a. */
 export function fitCalibration(scores, ys, options = {}) {
-  const epochs = options.epochs ?? 500;
-  const lr = options.lr ?? 0.1;
-  const fitIntercept = options.fitIntercept ?? true;
-  let a = options.initA ?? 1;
-  let b = options.initB ?? 0;
-  const n = scores.length;
-  const logits = scores.map((p) => Math.log(clamp(p, 1e-9, 1 - 1e-9) / (1 - clamp(p, 1e-9, 1 - 1e-9))));
+  const sc = Array.isArray(scores) ? scores : [];
+  const yy = Array.isArray(ys) ? ys : [];
+  const epochs = (options && options.epochs) ?? 500;
+  const lr = (options && options.lr) ?? 0.1;
+  const fitIntercept = (options && options.fitIntercept) ?? true;
+  let a = (options && options.initA) ?? 1;
+  let b = (options && options.initB) ?? 0;
+  const n = sc.length;
+  if (n === 0 || n !== yy.length) {
+    const apply = (p) => sanitizeNumber(p, 0.5);
+    return { kind: 'platt-temperature', a: 1, b: 0, temperature: 1, loss: 0, apply, calibrate: sc.slice(), trainBrier: 0, calibratedBrier: 0, trainEce: 0, calibratedEce: 0 };
+  }
+  const logits = sc.map((p) => { const z = clamp(sanitizeNumber(p,0.5), 1e-9, 1 - 1e-9); return Math.log(z / (1 - z)); });
   let loss = 0;
   for (let e = 0; e < epochs; e++) {
     let ga = 0;
@@ -681,11 +740,12 @@ export function fitCalibration(scores, ys, options = {}) {
     let ll = 0;
     for (let i = 0; i < n; i++) {
       const q = sigmoid(a * logits[i] + b);
-      const d = q - ys[i];
+      const d = q - (yy[i] ? 1 : 0);
       ga += d * logits[i];
       gb += d;
       const pc = clamp(q, 1e-12, 1 - 1e-12);
-      ll += -(ys[i] * Math.log(pc) + (1 - ys[i]) * Math.log(1 - pc));
+      const yi = yy[i] ? 1 : 0;
+      ll += -(yi * Math.log(pc) + (1 - yi) * Math.log(1 - pc));
     }
     a -= (lr * ga) / n;
     if (fitIntercept) b -= (lr * gb) / n;
@@ -698,10 +758,10 @@ export function fitCalibration(scores, ys, options = {}) {
     const z = clamp(p, 1e-9, 1 - 1e-9);
     return sigmoid(a * Math.log(z / (1 - z)) + b);
   };
-  let calibrated = scores.map(apply);
+  let calibrated = sc.map(apply);
   // Identity is always feasible. Never report a calibration that is worse on
   // the fitting split than doing nothing.
-  const score = (s) => brierScore(s, ys) + expectedCalibrationError(s, ys);
+  const score = (s) => brierScore(s, yy) + expectedCalibrationError(s, yy);
   if (score(calibrated) > score(scores) + 1e-12) {
     a = 1;
     b = 0;
@@ -715,10 +775,10 @@ export function fitCalibration(scores, ys, options = {}) {
     loss,
     apply,
     calibrate: calibrated,
-    trainBrier: brierScore(scores, ys),
-    calibratedBrier: brierScore(calibrated, ys),
-    trainEce: expectedCalibrationError(scores, ys),
-    calibratedEce: expectedCalibrationError(calibrated, ys)
+    trainBrier: brierScore(sc, yy),
+    calibratedBrier: brierScore(calibrated, yy),
+    trainEce: expectedCalibrationError(sc, yy),
+    calibratedEce: expectedCalibrationError(calibrated, yy)
   };
 }
 
@@ -730,9 +790,9 @@ function tprAt(indices, rows, scores, t) {
   let tp = 0;
   let positives = 0;
   for (const i of indices) {
-    if (rows[i].y) {
+    if (rows[i] && rows[i].y) {
       positives++;
-      if (scores[i] >= t) tp++;
+      if (sanitizeNumber(scores && scores[i], 0) >= t) tp++;
     }
   }
   return positives ? tp / positives : 0;
@@ -745,7 +805,7 @@ function tprAt(indices, rows, scores, t) {
  * are tightly clustered after calibration.
  */
 function thresholdForTpr(indices, rows, scores, goal, reference) {
-  const positives = indices.filter((i) => rows[i].y).map((i) => scores[i]).sort((a, b) => a - b);
+  const positives = indices.filter((i) => rows[i] && rows[i].y).map((i) => sanitizeNumber(scores[i],0)).sort((a, b) => a - b);
   if (!positives.length) return reference;
   const targetCount = Math.round(goal * positives.length);
   // Candidate cut points: below each relevant positive score and above it, so
@@ -774,7 +834,7 @@ function thresholdForTpr(indices, rows, scores, goal, reference) {
 
 function selectionAt(indices, scores, t) {
   let selected = 0;
-  for (const i of indices) if (scores[i] >= t) selected++;
+  for (const i of indices) if (sanitizeNumber(scores && scores[i], 0) >= t) selected++;
   return indices.length ? selected / indices.length : 0;
 }
 
@@ -782,7 +842,8 @@ function selectionAt(indices, scores, t) {
 function groupIndices(rows, subgroupKey) {
   const byGroup = new Map();
   for (let i = 0; i < rows.length; i++) {
-    const g = rows[i][subgroupKey] | 0;
+    const raw = rows[i] ? rows[i][subgroupKey] : 0;
+    const g = Number.isFinite(raw) ? (raw | 0) : 0;
     if (!byGroup.has(g)) byGroup.set(g, []);
     byGroup.get(g).push(i);
   }
@@ -798,10 +859,12 @@ function groupIndices(rows, subgroupKey) {
  * global baseline while subgroup TPRs converge.
  */
 export function fitGroupThresholds(rows, scores, options = {}) {
-  const grid = options.grid ?? 101;
-  const subgroupKey = options.subgroupKey || 'rural';
-  const reference = options.referenceThreshold ?? 0.5;
-  const byGroup = groupIndices(rows, subgroupKey);
+  const rr = Array.isArray(rows) ? rows : [];
+  const ss = Array.isArray(scores) ? scores : [];
+  const grid = (options && options.grid) ?? 101;
+  const subgroupKey = (options && options.subgroupKey) || 'rural';
+  const reference = (options && options.referenceThreshold) ?? 0.5;
+  const byGroup = groupIndices(rr, subgroupKey);
   const ids = [...byGroup.keys()].sort((a, b) => a - b);
   if (ids.length < 2) return { thresholds: { [ids[0]]: reference }, goal: 0, perGroup: {} };
 
@@ -812,7 +875,7 @@ export function fitGroupThresholds(rows, scores, options = {}) {
     for (let k = 10; k < grid - 10; k++) {
       const t = k / (grid - 1);
       let correct = 0;
-      for (const i of idx) if ((scores[i] >= t ? 1 : 0) === rows[i].y) correct++;
+      for (const i of idx) if ((sanitizeNumber(scores[i],0) >= t ? 1 : 0) === (rows[i] && rows[i].y ? 1 : 0)) correct++;
       const score = correct / idx.length - 0.001 * Math.abs(t - reference);
       if (score > best.score) best = { t, score };
     }
@@ -847,10 +910,12 @@ export function selectionTargetFromTrain(rows, scores, threshold, subgroupKey) {
 
 /** One threshold per group targeting a specified selection rate. */
 export function optimizeSelectionThresholds(rows, scores, options = {}) {
-  const grid = options.grid ?? 101;
-  const subgroupKey = options.subgroupKey || 'rural';
-  const target = options.target ?? 0.5;
-  const byGroup = groupIndices(rows, subgroupKey);
+  const rr = Array.isArray(rows) ? rows : [];
+  const ss = Array.isArray(scores) ? scores : [];
+  const grid = (options && options.grid) ?? 101;
+  const subgroupKey = (options && options.subgroupKey) || 'rural';
+  const target = (options && options.target) ?? 0.5;
+  const byGroup = groupIndices(rr, subgroupKey);
   const out = {};
   for (const [g, idx] of byGroup) {
     let bestT = 0.5;
@@ -909,20 +974,27 @@ export function tradeoffNotes(audit) {
 /* ------------------------------------------------------------------ */
 
 function metricsWithGroups(rows, scores, threshold, subgroupKey) {
-  const ys = rows.map((r) => r.y);
+  const rr = Array.isArray(rows) ? rows : [];
+  const ss = Array.isArray(scores) ? scores : [];
+  const ys = rr.map((r) => (r && r.y ? 1 : 0));
   return {
-    ...overallMetrics(scores, ys, threshold),
-    groups: fairnessSummary(subgroupMetrics(rows, scores, threshold, subgroupKey), subgroupKey)
+    ...overallMetrics(ss, ys, threshold),
+    groups: fairnessSummary(subgroupMetrics(rr, ss, threshold, subgroupKey), subgroupKey)
   };
 }
 
 function strategyWithThresholds(id, label, blurb, rows, scores, thresholds, subgroupKey, scenario) {
-  const ys = rows.map((r) => r.y);
+  const rr = Array.isArray(rows) ? rows : [];
+  const ss = Array.isArray(scores) ? scores : [];
+  const ys = rr.map((r) => (r && r.y ? 1 : 0));
   const counts = { tp: 0, fp: 0, tn: 0, fn: 0 };
   const groups = {};
-  for (let i = 0; i < rows.length; i++) {
-    const g = rows[i][subgroupKey] | 0;
-    const pred = scores[i] >= thresholds[g] ? 1 : 0;
+  for (let i = 0; i < rr.length; i++) {
+    const raw = rr[i] ? rr[i][subgroupKey] : 0;
+    const g = Number.isFinite(raw) ? (raw | 0) : 0;
+    const sc = sanitizeNumber(ss[i], 0);
+    const th = (thresholds && thresholds[g] != null) ? thresholds[g] : 0.5;
+    const pred = sc >= th ? 1 : 0;
     if (pred && ys[i]) counts.tp++;
     else if (pred) counts.fp++;
     else if (ys[i]) counts.fn++;
@@ -932,7 +1004,7 @@ function strategyWithThresholds(id, label, blurb, rows, scores, thresholds, subg
     s.n++;
     s.positives += ys[i];
     s.selected += pred;
-    s.conf += scores[i];
+    s.conf += sc;
     s.acc += ys[i];
     if (pred && ys[i]) s.tp++;
     else if (pred) s.fp++;
@@ -944,17 +1016,17 @@ function strategyWithThresholds(id, label, blurb, rows, scores, thresholds, subg
     detail[g] = {
       n: s.n,
       positives: s.positives,
-      prevalence: s.positives / s.n,
-      selectionRate: s.selected / s.n,
+      prevalence: safeDiv(s.positives, s.n, 0),
+      selectionRate: safeDiv(s.selected, s.n, 0),
       tpr: s.positives ? s.tp / s.positives : 0,
       fnr: s.positives ? s.fn / s.positives : 0,
       fpr: s.n - s.positives ? s.fp / (s.n - s.positives) : 0,
-      calibrationError: Math.abs(s.acc - s.conf) / s.n,
+      calibrationError: safeDiv(Math.abs(s.acc - s.conf), s.n, 0),
       counts: { tp: s.tp, fp: s.fp, tn: s.tn, fn: s.fn }
     };
   }
   const overall = classMetrics(counts);
-  const preds = rows.map((r, i) => (scores[i] >= thresholds[r[subgroupKey] | 0] ? 1 : 0));
+  const preds = rr.map((r, i) => { const raw = r ? r[subgroupKey] : 0; const g = Number.isFinite(raw) ? (raw | 0) : 0; const th = (thresholds && thresholds[g] != null) ? thresholds[g] : 0.5; return (sanitizeNumber(ss[i],0) >= th ? 1 : 0); });
   return {
     id,
     label,
@@ -1221,6 +1293,93 @@ export function runAudit(options = {}) {
       totalMs: nowMs() - started
     }
   };
+}
+
+
+/* ------------------------------------------------------------------ */
+/* CSV parsing and validation                                         */
+/* ------------------------------------------------------------------ */
+
+/** Minimal but robust CSV parser. Returns { headers, rows, skipped }. */
+export function parseCsv(text) {
+  const input = text == null ? '' : String(text);
+  const records = [];
+  let field = '';
+  let row = [];
+  let inQuotes = false;
+  let atFieldStart = true;
+  let i = 0;
+  const pushField = () => { row.push(field); field = ''; atFieldStart = true; };
+  const pushRow = () => { records.push(row); row = []; };
+  while (i < input.length) {
+    const ch = input[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (input[i + 1] === '"') { field += '"'; i += 2; continue; }
+        inQuotes = false; i++; continue;
+      }
+      field += ch; i++; continue;
+    }
+    if (ch === '"') { inQuotes = true; atFieldStart = true; i++; continue; }
+    if (ch === ',') { pushField(); i++; continue; }
+    if (ch === '\n') { pushField(); pushRow(); i++; continue; }
+    if (ch === '\r') { if (input[i + 1] === '\n') { i++; continue; } pushField(); pushRow(); i++; continue; }
+    field += ch; atFieldStart = false; i++;
+  }
+  if (field !== '' || row.length > 0 || (records.length === 0 && input === '')) {
+    // push trailing field/row if there is any content
+    if (field !== '' || row.length > 0) { pushField(); pushRow(); }
+  }
+  // Remove completely empty trailing rows
+  while (records.length && records[records.length - 1].length === 1 && records[records.length - 1][0] === '' && records.length > 1) records.pop();
+
+  if (!records.length) return { headers: [], rows: [], skipped: 0 };
+  const headers = records[0].map((h) => String(h).trim());
+  const rows = [];
+  let skipped = 0;
+  for (let r = 1; r < records.length; r++) {
+    const rec = records[r];
+    if (rec.length === 1 && rec[0] === '') continue;
+    if (rec.length !== headers.length) { skipped++; continue; }
+    const obj = {};
+    let valid = true;
+    headers.forEach((h, j) => {
+      const raw = rec[j];
+      const trimmed = String(raw).trim();
+      if (trimmed === '') { obj[h] = null; return; }
+      const num = Number(trimmed);
+      if (Number.isFinite(num) && trimmed !== '') obj[h] = num;
+      else obj[h] = trimmed;
+    });
+    rows.push(obj);
+  }
+  return { headers, rows, skipped };
+}
+
+/** Validate parsed rows against a minimal schema: required keys present. */
+export function validateCsvRows(rows, requiredKeys = []) {
+  const rr = Array.isArray(rows) ? rows : [];
+  const required = Array.isArray(requiredKeys) ? requiredKeys : [];
+  const errors = [];
+  rr.forEach((row, idx) => {
+    for (const key of required) {
+      if (row == null || row[key] == null || row[key] === '') errors.push({ row: idx + 1, key, message: 'missing ' + key });
+    }
+  });
+  return { valid: errors.length === 0, errors };
+}
+
+export function sanitizeRow(row, defaults = {}) {
+  const out = { ...defaults };
+  if (!row || typeof row !== 'object') return out;
+  for (const [k, v] of Object.entries(row)) {
+    if (v === null || v === undefined || (typeof v === 'number' && !Number.isFinite(v))) {
+      out[k] = defaults[k] != null ? defaults[k] : 0;
+    } else {
+      out[k] = v;
+    }
+  }
+  return out;
 }
 
 /** Flatten strategy metrics for CSV or JSON export. */

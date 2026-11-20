@@ -18,7 +18,20 @@ import {
   formatGapChange,
   tradeoffNotes,
   runAudit,
-  exportAudit
+  exportAudit,
+  safeDiv,
+  sanitizeNumber,
+  parseCsv,
+  validateCsvRows,
+  sanitizeRow,
+  rocAuc,
+  brierScore,
+  expectedCalibrationError,
+  reliabilityDiagram,
+  subgroupMetrics,
+  fairnessSummary,
+  overallMetrics,
+  classMetrics
 } from '../src/ml-engine.js';
 
 const scenarioIds = SCENARIOS.map((s) => s.id);
@@ -581,4 +594,386 @@ test('gap UI never reports no gap when the actual gap is positive at clinic seed
   for (const n of notes) {
     for (const c of n.changes) assert.ok(c.includes('pp'));
   }
+});
+
+/* ------------------------------------------------------------------ */
+/* Hardening and edge cases                                            */
+/* ------------------------------------------------------------------ */
+
+test('safeDiv handles zero and non-finite', () => {
+  assert.equal(safeDiv(10, 2), 5);
+  assert.equal(safeDiv(10, 0), 0);
+  assert.equal(safeDiv(10, 0, 99), 99);
+  assert.equal(safeDiv(NaN, 2), 0);
+  assert.equal(safeDiv(10, NaN), 0);
+});
+
+test('sanitizeNumber handles bad input', () => {
+  assert.equal(sanitizeNumber('42'), 42);
+  assert.equal(sanitizeNumber('abc', 7), 7);
+  assert.equal(sanitizeNumber(NaN, 3), 3);
+  assert.equal(sanitizeNumber(null, 1), 1);
+});
+
+test('brierScore empty and constant', () => {
+  assert.equal(brierScore([], []), 0);
+  assert.equal(brierScore([0.5, 0.5], [0, 1]), 0.25);
+});
+
+test('rocAuc empty and single class', () => {
+  assert.equal(rocAuc([], []), 0.5);
+  assert.equal(rocAuc([0.1, 0.2], [1, 1]), 0.5);
+  assert.equal(rocAuc([0.1, 0.2], [0, 0]), 0.5);
+});
+
+test('expectedCalibrationError empty', () => {
+  assert.equal(expectedCalibrationError([], [], 10), 0);
+  assert.equal(expectedCalibrationError([0.5], [], 10), 0);
+});
+
+test('reliabilityDiagram bins shape', () => {
+  const d = reliabilityDiagram([0.1, 0.9], [0, 1], 5);
+  assert.equal(d.length, 5);
+  assert.ok(d.every((b) => Number.isFinite(b.confidence)));
+});
+
+test('overallMetrics empty', () => {
+  const m = overallMetrics([], [], 0.5);
+  assert.equal(m.n, 0);
+  assert.equal(m.accuracy, 0);
+  assert.equal(m.auc, 0.5);
+});
+
+test('classMetrics zero counts', () => {
+  const c = classMetrics({ tp: 0, fp: 0, tn: 0, fn: 0 });
+  assert.equal(c.precision, 0);
+  assert.equal(c.recall, 0);
+  assert.equal(c.f1, 0);
+  assert.equal(c.accuracy, 0);
+});
+
+test('subgroupMetrics zero count subgroup', () => {
+  const rows = [{ y: 1, g: 1 }];
+  const g = subgroupMetrics(rows, [0.7], 0.5, 'g');
+  assert.ok(g[1]);
+  assert.equal(g[1].n, 1);
+  // group 0 absent, no crash
+});
+
+test('fairnessSummary single group', () => {
+  const groups = { 0: { n: 4, positives: 2, prevalence: 0.5, selectionRate: 0.5, tpr: 0.5, fnr: 0.5, fpr: 0.5, calibrationError: 0.1, counts: { tp: 1, fp: 1, tn: 1, fn: 1 } } };
+  const f = fairnessSummary(groups, 'g');
+  assert.equal(f.equalOpportunityGap, 0);
+  assert.equal(f.fnrDisparity, 0);
+});
+
+test('fitCalibration empty and constant predictions', () => {
+  const empty = fitCalibration([], []);
+  assert.equal(empty.a, 1);
+  const c = fitCalibration([0.5, 0.5, 0.5], [0, 1, 0]);
+  assert.ok(Number.isFinite(c.a));
+  assert.equal(c.calibrate.length, 3);
+});
+
+test('trainLogisticRegression empty rows', () => {
+  const m = trainLogisticRegression([], { featureKeys: ['x'] });
+  assert.equal(m.predictProba({ x: 5 }), 0.5);
+  assert.deepEqual(m.loss, []);
+});
+
+test('trainDecisionTree empty rows', () => {
+  const m = trainDecisionTree([], { featureKeys: ['x'] });
+  assert.equal(m.predictProba({ x: 5 }), 0.5);
+  assert.equal(m.leaves, 1);
+});
+
+test('fitGroupThresholds empty and single group', () => {
+  const r = fitGroupThresholds([], [], { subgroupKey: 'g' });
+  assert.ok(r.thresholds);
+  const r2 = fitGroupThresholds([{ y: 1, g: 0 }], [0.7], { subgroupKey: 'g' });
+  assert.ok(r2.thresholds[0] !== undefined);
+});
+
+test('optimizeSelectionThresholds empty', () => {
+  const t = optimizeSelectionThresholds([], [], { subgroupKey: 'g', target: 0.5 });
+  assert.ok(typeof t === 'object');
+});
+
+test('threshold sweep extreme 0 and 1', () => {
+  const rows = [{ y: 1, g: 0 }, { y: 0, g: 0 }, { y: 1, g: 1 }, { y: 0, g: 1 }];
+  const scores = [0.9, 0.1, 0.8, 0.2];
+  const t0 = optimizeGroupThresholds(rows, scores, { subgroupKey: 'g', referenceThreshold: 0 });
+  const t1 = optimizeGroupThresholds(rows, scores, { subgroupKey: 'g', referenceThreshold: 1 });
+  for (const v of Object.values(t0)) assert.ok(Number.isFinite(v));
+  for (const v of Object.values(t1)) assert.ok(Number.isFinite(v));
+});
+
+test('parseCsv basic and quoted', () => {
+  const csv = 'a,b\n1,2\n"3,4",5';
+  const { headers, rows, skipped } = parseCsv(csv);
+  assert.deepEqual(headers, ['a', 'b']);
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].a, 1);
+  assert.equal(rows[1].a, '3,4');
+  assert.equal(skipped, 0);
+});
+
+test('parseCsv malformed rows', () => {
+  const csv = 'a,b\n1,2,3\n4,5';
+  const { rows, skipped } = parseCsv(csv);
+  assert.equal(rows.length, 1);
+  assert.equal(skipped, 1);
+});
+
+test('parseCsv empty', () => {
+  const { headers, rows } = parseCsv('');
+  assert.deepEqual(headers, []);
+  assert.deepEqual(rows, []);
+});
+
+test('validateCsvRows', () => {
+  const rows = [{ a: 1 }, { a: null }];
+  const res = validateCsvRows(rows, ['a']);
+  assert.equal(res.valid, false);
+  assert.equal(res.errors.length, 1);
+});
+
+test('sanitizeRow', () => {
+  const out = sanitizeRow({ x: NaN, y: 5 }, { x: 0, y: 0 });
+  assert.equal(out.x, 0);
+  assert.equal(out.y, 5);
+});
+
+test('runAudit small n and finite', () => {
+  const a = runAudit({ scenarioId: 'clinic', seed: 1, bias: 0.5, n: 40, threshold: 0.3 });
+  assert.ok(Number.isFinite(a.baseline.metrics.accuracy));
+  for (const s of a.strategies) assert.ok(Number.isFinite(s.metrics.groups.fnrDisparity));
+});
+
+test('runAudit extreme threshold 0.1 and 0.8', () => {
+  for (const th of [0.1, 0.8]) {
+    const a = runAudit({ scenarioId: 'shelter', seed: 2, bias: 0.9, n: 60, threshold: th });
+    assert.ok(Number.isFinite(a.baseline.metrics.groups.equalOpportunityGap));
+  }
+});
+
+test('tradeoffNotes returns array', () => {
+  const a = runAudit({ scenarioId: 'clinic', seed: 3, bias: 0.6, n: 80, threshold: 0.35 });
+  const notes = tradeoffNotes(a);
+  assert.ok(Array.isArray(notes));
+});
+
+test('exportAudit rows', () => {
+  const a = runAudit({ scenarioId: 'clinic', seed: 4, bias: 0.6, n: 60, threshold: 0.35 });
+  const rows = exportAudit(a);
+  assert.equal(rows.length, a.strategies.length);
+  assert.ok(rows[0].accuracy !== undefined);
+});
+
+test('formatGapChange branches', () => {
+  assert.match(formatGapChange(-0.05, 0.1), /increased/);
+  assert.match(formatGapChange(0.05, 0.1), /reduced/);
+  assert.match(formatGapChange(0, 0), /no gap/);
+});
+
+test('all audit values finite JSON serializable (edge)', () => {
+  const a = runAudit({ scenarioId: 'scholarship', seed: 5, bias: 0.2, n: 50, threshold: 0.2 });
+  const json = JSON.stringify(a);
+  assert.ok(json.length > 0);
+  assert.ok(!json.includes('NaN'));
+});
+
+test('constant predictions calibration', () => {
+  const cal = fitCalibration([0.5, 0.5, 0.5, 0.5], [0, 0, 1, 1]);
+  assert.equal(cal.calibrate.length, 4);
+  assert.ok(Number.isFinite(cal.temperature));
+});
+
+test('subgroupMetrics calibrationError finite', () => {
+  const rows = [{ y: 1, g: 0 }, { y: 0, g: 1 }];
+  const m = subgroupMetrics(rows, [NaN, 2], 0.5, 'g');
+  for (const grp of Object.values(m)) assert.ok(Number.isFinite(grp.calibrationError));
+});
+
+test('fairnessSummary empty groups', () => {
+  const f = fairnessSummary({}, 'g');
+  assert.equal(f.demographicParityGap, 0);
+});
+
+test('reliabilityDiagram empty', () => {
+  const d = reliabilityDiagram([], [], 10);
+  assert.equal(d.length, 10);
+});
+
+test('rocAuc ties', () => {
+  const auc = rocAuc([0.5, 0.5, 0.5], [1, 0, 1]);
+  assert.ok(Number.isFinite(auc));
+});
+
+test('brierScore single', () => {
+  assert.equal(brierScore([1], [1]), 0);
+});
+
+test('overallMetrics threshold 0 and 1', () => {
+  const scores = [0.2, 0.8];
+  const ys = [0, 1];
+  const a = overallMetrics(scores, ys, 0);
+  const b = overallMetrics(scores, ys, 1);
+  assert.ok(Number.isFinite(a.accuracy));
+  assert.ok(Number.isFinite(b.accuracy));
+});
+
+test('fitCalibration extreme', () => {
+  const c = fitCalibration([0, 1, 0.5], [0, 1, 1], { epochs: 10 });
+  assert.ok(Number.isFinite(c.a));
+});
+
+test('parseCsv quoted newlines', () => {
+  const csv = 'a,b\n"line1\nline2",x';
+  const { rows } = parseCsv(csv);
+  assert.equal(rows.length, 1);
+});
+
+test('validateCsvRows valid', () => {
+  const rows = [{ a: 1, b: 2 }];
+  const res = validateCsvRows(rows, ['a', 'b']);
+  assert.equal(res.valid, true);
+  assert.equal(res.errors.length, 0);
+});
+
+test('sanitizeRow defaults', () => {
+  const out = sanitizeRow(null, { x: 7 });
+  assert.equal(out.x, 7);
+});
+
+test('mulberry32 negative seed', () => {
+  const r = mulberry32(-1);
+  const v = r();
+  assert.ok(v >= 0 && v < 1);
+});
+
+test('generateDataset min n', () => {
+  const d = generateDataset({ n: 5, seed: 1 });
+  assert.ok(d.train.length + d.test.length >= 20);
+});
+
+test('SCENARIOS count', () => {
+  assert.equal(SCENARIOS.length, 3);
+});
+
+test('DEFAULT constants finite', () => {
+  assert.ok(Number.isFinite(DEFAULT_SEED));
+});
+
+test('runAudit proxy removal', () => {
+  const a = runAudit({ scenarioId: 'clinic', seed: 6, bias: 0.6, n: 60, threshold: 0.35 });
+  const proxy = a.strategies.find((s) => s.id === 'proxy-removal');
+  assert.ok(proxy);
+  assert.ok(Number.isFinite(proxy.metrics.auc));
+});
+
+test('counterexamples array', () => {
+  const a = runAudit({ scenarioId: 'scholarship', seed: 7, bias: 0.8, n: 120, threshold: 0.35 });
+  assert.ok(Array.isArray(a.counterexamples));
+});
+
+test('failures length 10', () => {
+  const a = runAudit({ scenarioId: 'clinic', seed: 8, bias: 0.6, n: 100, threshold: 0.35 });
+  assert.equal(a.failures.length, 10);
+});
+
+test('roc curve nonempty', () => {
+  const a = runAudit({ scenarioId: 'clinic', seed: 9, bias: 0.6, n: 80, threshold: 0.35 });
+  assert.ok(a.roc.length > 1);
+});
+
+test('reliability array length 10', () => {
+  const a = runAudit({ scenarioId: 'clinic', seed: 10, bias: 0.6, n: 80, threshold: 0.35 });
+  assert.equal(a.reliability.length, 10);
+});
+
+test('calibration identity possible', () => {
+  const a = runAudit({ scenarioId: 'shelter', seed: 11, bias: 0.6, n: 80, threshold: 0.35 });
+  assert.ok(Number.isFinite(a.calibration.temperature));
+});
+
+test('models coefficients', () => {
+  const a = runAudit({ scenarioId: 'clinic', seed: 12, bias: 0.6, n: 80, threshold: 0.35 });
+  assert.ok(Object.keys(a.models.lr.coefficients).length > 0);
+});
+
+test('tree rules nonempty', () => {
+  const a = runAudit({ scenarioId: 'clinic', seed: 13, bias: 0.6, n: 80, threshold: 0.35 });
+  assert.ok(a.models.tree.rules.length > 0);
+});
+
+test('performance ms finite', () => {
+  const a = runAudit({ scenarioId: 'clinic', seed: 14, bias: 0.6, n: 80, threshold: 0.35 });
+  assert.ok(Number.isFinite(a.performance.totalMs));
+});
+
+test('tradeoff banner via notes', () => {
+  const a = runAudit({ scenarioId: 'clinic', seed: 15, bias: 0.6, n: 80, threshold: 0.35 });
+  assert.ok(Array.isArray(tradeoffNotes(a)));
+});
+
+test('formatGapChange zero actual gap', () => {
+  assert.match(formatGapChange(0, 0), /no gap/);
+});
+
+test('strategy thresholds object', () => {
+  const a = runAudit({ scenarioId: 'clinic', seed: 16, bias: 0.6, n: 80, threshold: 0.35 });
+  const eo = a.strategies.find((s) => s.id === 'equal-opportunity');
+  assert.ok(eo.thresholds && typeof eo.thresholds === 'object');
+});
+
+test('baseline predictions length', () => {
+  const a = runAudit({ scenarioId: 'clinic', seed: 17, bias: 0.6, n: 80, threshold: 0.35 });
+  assert.equal(a.baseline.predictions.length, a.testCount);
+});
+
+test('exportAudit csv ready', () => {
+  const a = runAudit({ scenarioId: 'clinic', seed: 18, bias: 0.6, n: 80, threshold: 0.35 });
+  const rows = exportAudit(a);
+  assert.ok(rows.every((r) => Number.isFinite(r.recall)));
+});
+
+test('group labels present', () => {
+  const a = runAudit({ scenarioId: 'clinic', seed: 19, bias: 0.6, n: 80, threshold: 0.35 });
+  assert.ok(a.groupLabels[0] && a.groupLabels[1]);
+});
+
+test('harmedGroup valid', () => {
+  const a = runAudit({ scenarioId: 'clinic', seed: 20, bias: 0.6, n: 80, threshold: 0.35 });
+  assert.ok(a.harmedGroup === 0 || a.harmedGroup === 1);
+});
+
+test('features present', () => {
+  const a = runAudit({ scenarioId: 'clinic', seed: 21, bias: 0.6, n: 80, threshold: 0.35 });
+  assert.ok(a.features.length > 0);
+});
+
+test('proxyKey present', () => {
+  const a = runAudit({ scenarioId: 'clinic', seed: 22, bias: 0.6, n: 80, threshold: 0.35 });
+  assert.ok(typeof a.proxyKey === 'string');
+});
+
+test('subgroupKey present', () => {
+  const a = runAudit({ scenarioId: 'clinic', seed: 23, bias: 0.6, n: 80, threshold: 0.35 });
+  assert.ok(typeof a.subgroupKey === 'string');
+});
+
+test('trainCount + testCount', () => {
+  const a = runAudit({ scenarioId: 'clinic', seed: 24, bias: 0.6, n: 100, threshold: 0.35 });
+  assert.equal(a.trainCount + a.testCount, 100);
+});
+
+test('bias clamped', () => {
+  const a = runAudit({ scenarioId: 'clinic', seed: 25, bias: 5, n: 60, threshold: 0.35 });
+  assert.equal(a.bias, 1);
+});
+
+test('n clamped min', () => {
+  const a = runAudit({ scenarioId: 'clinic', seed: 26, bias: 0.6, n: 5, threshold: 0.35 });
+  assert.ok(a.trainCount + a.testCount >= 20);
 });

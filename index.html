@@ -16,7 +16,6 @@
       <span class="brand-mark" aria-hidden="true">TL</span>
       <div>
         <p class="brand-name">TriageLens</p>
-        <p class="brand-tag">Interactive ML &amp; fairness auditor</p>
       </div>
     </div>
     <div class="topbar-right">
@@ -34,16 +33,10 @@
     <!-- Hero -->
     <section class="hero" aria-labelledby="hero-title">
       <div class="hero-copy">
-        <p class="eyebrow">Teens in AI Global Challenge 2027 &middot; Ages 13+</p>
         <h1 id="hero-title">See who the model <em>misses.</em></h1>
-        <p class="hero-lead">
-          Train two real classifiers in your browser, calibrate their probabilities, and watch the exact
-          accuracy-versus-fairness trade-off of four mitigation policies against an uncalibrated baseline.
-          Every row is a <strong>synthetic benchmark</strong>. No data leaves this page.
-        </p>
         <div class="hero-actions">
-          <a class="button primary" href="#lab">Open the audit lab <span aria-hidden="true">↘</span></a>
-          <a class="button ghost" href="#ethics">Read the ethics panel <span aria-hidden="true">→</span></a>
+          <button class="button primary" id="demo-hidden" type="button">Catch hidden subgroup failure <span aria-hidden="true">↘</span></button>
+          <a class="button ghost" href="#lab">Open the audit lab <span aria-hidden="true">→</span></a>
         </div>
         <ul class="hero-facts" aria-label="Project facts">
           <li><strong>Zero dependencies</strong> plain ES modules + Canvas</li>
@@ -53,8 +46,7 @@
       </div>
       <aside class="hero-panel" aria-label="Live audit snapshot">
         <div class="panel-head">
-          <span class="panel-kicker">Live held-out audit</span>
-          <span class="live-badge"><span aria-hidden="true">●</span> LOCAL</span>
+            <span class="live-badge"><span aria-hidden="true">●</span> LOCAL</span>
         </div>
         <div class="snapshot-metric">
           <span class="snapshot-label">Fairness gap before mitigation</span>
@@ -75,17 +67,44 @@
       </aside>
     </section>
 
+    <!-- Hidden subgroup failure -->
+    <section class="section hidden-failure" aria-labelledby="hidden-title">
+      <h2 id="hidden-title">High overall accuracy can hide subgroup failure.</h2>
+      <div class="hidden-grid" id="hidden-grid">
+        <div class="hidden-card">
+          <span class="metric-label">Overall accuracy</span>
+          <strong class="metric-value" id="h-accuracy">--</strong>
+        </div>
+        <div class="hidden-card">
+          <span class="metric-label">ROC-AUC</span>
+          <strong class="metric-value" id="h-auc">--</strong>
+        </div>
+        <div class="hidden-card warn">
+          <span class="metric-label">Harmed group FNR</span>
+          <strong class="metric-value" id="h-fnr">--</strong>
+        </div>
+        <div class="hidden-card">
+          <span class="metric-label">Advantaged group FNR</span>
+          <strong class="metric-value" id="h-fnr0">--</strong>
+        </div>
+        <div class="hidden-card accent">
+          <span class="metric-label">FNR disparity before / after</span>
+          <strong class="metric-value" id="h-disp">--</strong>
+        </div>
+        <div class="hidden-card">
+          <span class="metric-label">Recall change</span>
+          <strong class="metric-value" id="h-recall">--</strong>
+        </div>
+      </div>
+      <p class="hidden-note" id="hidden-note">Run the demo to see the before and after subgroup impact.</p>
+    </section>
+
     <!-- Control deck -->
     <section id="lab" class="section lab" aria-labelledby="lab-title">
       <div class="section-head">
         <div>
-          <p class="eyebrow">The audit lab</p>
           <h2 id="lab-title">Change one knob. Watch the trade-off.</h2>
         </div>
-        <p class="section-intro">
-          Every slider retrains both models and re-evaluates on untouched held-out rows. The numbers below
-          are computed live, never hard-coded.
-        </p>
       </div>
 
       <div class="control-grid">
@@ -179,13 +198,8 @@
     <section class="section" aria-labelledby="compare-title">
       <div class="section-head">
         <div>
-          <p class="eyebrow">The mathematical trade-off</p>
           <h2 id="compare-title">Four mitigation policies plus an uncalibrated baseline, one held-out set.</h2>
         </div>
-        <p class="section-intro">
-          Each row is a complete decision policy applied to the same synthetic held-out rows. Fairness gaps
-          are absolute differences between the two subgroups; smaller is fairer.
-        </p>
       </div>
       <div class="table-wrap" tabindex="0" aria-label="Strategy comparison table, scroll horizontally if needed">
         <table class="compare-table">
@@ -209,9 +223,7 @@
     <!-- Explainability + model card -->
     <section class="section two-col" aria-labelledby="explain-title">
       <div class="card">
-        <p class="eyebrow">Interpretability</p>
         <h2 id="explain-title">What the linear model uses</h2>
-        <p class="card-intro">Standardized logistic coefficients. Longer bars mean a larger effect per standard deviation.</p>
         <div id="weight-bars" class="weight-bars" aria-live="polite"></div>
         <details class="tree-details">
           <summary>Inspect the decision tree rules</summary>
@@ -219,9 +231,7 @@
         </details>
       </div>
       <div class="card">
-        <p class="eyebrow">Training dynamics</p>
         <h2>Loss falls during gradient descent</h2>
-        <p class="card-intro">Real L2-regularized log loss, sampled every 10 epochs. No fabricated curve.</p>
         <canvas id="loss-canvas" width="620" height="260" role="img" aria-label="Logistic regression training loss curve"></canvas>
         <div class="mini-stats" id="mini-stats"></div>
       </div>
@@ -231,13 +241,8 @@
     <section class="section" aria-labelledby="counter-title">
       <div class="section-head">
         <div>
-          <p class="eyebrow">Counterexample inspector</p>
           <h2 id="counter-title">Held-out cases that change outcome.</h2>
         </div>
-        <p class="section-intro">
-          These are real rows from the held-out split: the global threshold misses them, but at least one
-          mitigation recovers them. Click a card for the full feature vector.
-        </p>
       </div>
       <p class="counterexample-count" id="counterexample-count" role="status"></p>
       <div id="counterexamples" class="case-grid" aria-live="polite"></div>
@@ -247,13 +252,8 @@
     <section id="ethics" class="section ethics" aria-labelledby="ethics-title">
       <div class="section-head">
         <div>
-          <p class="eyebrow">Model card &amp; ethics</p>
           <h2 id="ethics-title">Who benefits. Who could be harmed.</h2>
         </div>
-        <p class="section-intro">
-          This is a teaching instrument built on synthetic data. A fairness metric is a question to ask,
-          never a certificate of safety.
-        </p>
       </div>
       <div class="ethics-grid">
         <article class="ethics-card good">

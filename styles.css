@@ -51,8 +51,6 @@ html[data-theme='dark'] {
 
 * { box-sizing: border-box; }
 
-html { scroll-behavior: smooth; }
-
 body {
   margin: 0;
   background: var(--paper);
@@ -189,14 +187,6 @@ main { max-width: 1440px; margin: 0 auto; }
 }
 .section-head > div { flex: 1 1 55%; }
 .section-intro { flex: 1 1 40%; color: var(--ink-soft); font-size: 15px; margin: 0 0 4px; max-width: 520px; }
-.eyebrow {
-  font-size: 11px;
-  font-weight: 750;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--accent-ink);
-  margin: 0 0 12px;
-}
 
 /* Hero */
 .hero {
@@ -228,7 +218,6 @@ main { max-width: 1440px; margin: 0 auto; }
   box-shadow: var(--shadow);
 }
 .panel-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
-.panel-kicker { font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; font-weight: 700; color: var(--ink-faint); }
 .live-badge { font-size: 10px; font-weight: 750; letter-spacing: 0.08em; color: var(--accent-ink); background: var(--accent-soft); border-radius: 999px; padding: 4px 9px; }
 .live-badge span { font-size: 8px; margin-right: 3px; }
 .snapshot-metric { padding: 18px 0; border-bottom: 1px solid var(--line); }
@@ -433,4 +422,27 @@ canvas { display: block; width: 100%; height: auto; background: transparent; }
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
   .button:hover { transform: none; }
+}
+
+/* Hidden subgroup failure panel */
+.hidden-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+.hidden-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px;
+}
+.hidden-card.warn { border-color: var(--clay); }
+.hidden-card.accent { border-color: var(--accent); }
+.hidden-note { margin-top: 12px; color: var(--ink-soft); }
+@media (max-width: 720px) {
+  .hidden-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 420px) {
+  .hidden-grid { grid-template-columns: 1fr; }
 }

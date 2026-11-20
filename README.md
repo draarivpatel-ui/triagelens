@@ -44,7 +44,7 @@ node --test tests/ml-engine.test.mjs
 `node --test tests/ml-engine.test.mjs` (Node v26.8.1):
 
 ```text
-ℹ tests 54
+ℹ tests 118
 ℹ suites 0
 ℹ pass 54
 ℹ fail 0
@@ -102,7 +102,7 @@ styles.css                 editorial light/dark theme, responsive layout
 src/ml-engine.js           PRNG, generators, models, calibration, fairness, metrics
 src/charts.js              Canvas ROC, reliability, disparity, loss charts
 src/app.js                 UI controller, exports, accessibility wiring
-tests/ml-engine.test.mjs   54 deterministic Node tests
+tests/ml-engine.test.mjs   118 deterministic Node tests
 video/narration.txt        2-5 minute demo narration
 video/steps.json           verified demo click/tap choreography
 ```

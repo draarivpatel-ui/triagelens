@@ -42,6 +42,7 @@ function run() {
   renderCounterexamples(audit);
   renderEthics(audit);
   renderCharts(audit);
+  renderHidden(audit);
 }
 
 function renderHero(audit, wallMs) {
@@ -273,6 +274,23 @@ function renderEthics(audit) {
   $('ethics-human').textContent = audit.ethics.human;
 }
 
+function renderHidden(audit) {
+  const b = audit.baseline.metrics;
+  const eo = audit.strategies.find((s) => s.id === 'equal-opportunity');
+  const g = b.groups;
+  $('h-accuracy').textContent = pct(b.accuracy);
+  $('h-auc').textContent = num(b.auc);
+  $('h-fnr').textContent = pct(g.groupB.fnr);
+  $('h-fnr0').textContent = pct(g.groupA.fnr);
+  $('h-disp').textContent = pct(g.fnrDisparity) + ' -> ' + pct(eo.metrics.groups.fnrDisparity);
+  const recall = eo.metrics.recall - b.recall;
+  $('h-recall').textContent = (recall >= 0 ? '+' : '') + (recall * 100).toFixed(1) + ' pp';
+  $('hidden-note').textContent =
+    audit.scenarioName + ': ' + pct(b.accuracy) + ' accuracy and ' + num(b.auc) + ' AUC, but the harmed subgroup FNR is ' +
+    pct(g.groupB.fnr) + ' vs ' + pct(g.groupA.fnr) + '. Equal opportunity moves FNR disparity from ' +
+    pct(g.fnrDisparity) + ' to ' + pct(eo.metrics.groups.fnrDisparity) + '.';
+}
+
 function renderCharts(audit) {
   drawRoc($('roc-canvas'), audit.roc, audit.models.lr.auc);
   drawReliability($('reliability-canvas'), audit.reliability);
@@ -303,6 +321,15 @@ function toast(message) {
 }
 
 function wire() {
+  $('demo-hidden').addEventListener('click', () => {
+    $('scenario').value = 'scholarship';
+    $('bias').value = '0.85';
+    $('threshold').value = '0.45';
+    $('seed').value = '20270101';
+    run();
+    const el = document.getElementById('hidden-failure');
+    if (el) el.scrollIntoView({ behavior: 'auto', block: 'start' });
+  });
   $('scenario').addEventListener('change', run);
   for (const id of ['bias', 'threshold']) $(id).addEventListener('input', scheduleAudit);
   $('seed').addEventListener('change', run);
