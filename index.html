@@ -3,6 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; font-src 'none'; media-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
   <meta name="description" content="TriageLens: a browser-local interactive ML classifier, calibration and algorithmic fairness auditor with synthetic social-impact benchmarks.">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%2316624f'/%3E%3Ctext x='32' y='43' text-anchor='middle' font-family='Georgia' font-size='32' font-weight='bold' fill='white'%3ETL%3C/text%3E%3C/svg%3E">
   <title>TriageLens - Interactive ML &amp; Fairness Auditor</title>
@@ -29,7 +31,7 @@
     </div>
   </header>
 
-  <main id="main">
+  <main id="main" tabindex="-1">
     <!-- Hero -->
     <section class="hero" aria-labelledby="hero-title">
       <div class="hero-copy">
@@ -144,7 +146,7 @@
         </div>
       </div>
 
-      <div class="headline-metrics" id="headline-metrics" aria-live="polite">
+      <div class="headline-metrics" id="headline-metrics">
         <div class="metric-card">
           <span class="metric-label">Accuracy</span>
           <strong class="metric-value" id="m-accuracy">--</strong>
@@ -225,7 +227,7 @@
     <section class="section two-col" aria-labelledby="explain-title">
       <div class="card">
         <h2 id="explain-title">What the linear model uses</h2>
-        <div id="weight-bars" class="weight-bars" aria-live="polite"></div>
+        <div id="weight-bars" class="weight-bars"></div>
         <details class="tree-details">
           <summary>Inspect the decision tree rules</summary>
           <div id="tree-rules" class="tree-rules"></div>
@@ -246,7 +248,7 @@
         </div>
       </div>
       <p class="counterexample-count" id="counterexample-count" role="status"></p>
-      <div id="counterexamples" class="case-grid" aria-live="polite"></div>
+      <div id="counterexamples" class="case-grid"></div>
     </section>
 
     <!-- Ethics -->

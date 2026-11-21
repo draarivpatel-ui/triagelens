@@ -104,8 +104,8 @@ export function drawRoc(canvas, points, auc) {
   if (!s) return;
   const { ctx, w, h, p } = s;
   const m = { l: 42, r: 18, t: 18, b: 34 };
-  const pw = w - m.l - m.r;
-  const ph = h - m.t - m.b;
+  const pw = Math.max(60, w - m.l - m.r);
+  const ph = Math.max(20, h - m.t - m.b);
   axes(ctx, m.l, m.t, pw, ph, p, ticks(), ticks());
 
   ctx.fillStyle = p.faint;
@@ -166,8 +166,8 @@ export function drawReliability(canvas, bins) {
   if (!s) return;
   const { ctx, w, h, p } = s;
   const m = { l: 42, r: 18, t: 18, b: 34 };
-  const pw = w - m.l - m.r;
-  const ph = h - m.t - m.b;
+  const pw = Math.max(60, w - m.l - m.r);
+  const ph = Math.max(20, h - m.t - m.b);
   axes(ctx, m.l, m.t, pw, ph, p, ticks(), ticks());
 
   ctx.fillStyle = p.faint;
@@ -255,8 +255,8 @@ export function drawDisparity(canvas, strategies, groupLabels) {
   });
 
   const m = { l: 42, r: 16, t: legendBottom + 10, b: 42 };
-  const pw = w - m.l - m.r;
-  const ph = h - m.t - m.b;
+  const pw = Math.max(60, w - m.l - m.r);
+  const ph = Math.max(20, h - m.t - m.b);
   // The x axis is categorical (one slot per policy): numeric 0-1 ticks would
   // be meaningless, so only y ticks are drawn.
   axes(ctx, m.l, m.t, pw, ph, p, [], ticks());
@@ -319,8 +319,8 @@ export function drawLoss(canvas, losses) {
   if (!s) return;
   const { ctx, w, h, p } = s;
   const m = { l: 48, r: 16, t: 16, b: 30 };
-  const pw = w - m.l - m.r;
-  const ph = h - m.t - m.b;
+  const pw = Math.max(60, w - m.l - m.r);
+  const ph = Math.max(20, h - m.t - m.b);
   const lo = losses && losses.length ? Math.min(...losses) : 0;
   const hi = losses && losses.length ? Math.max(...losses) : 1;
   const span = hi - lo || 1;

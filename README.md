@@ -4,7 +4,7 @@
 
 **An interactive, zero-dependency, 100% browser-local ML classifier, calibration and algorithmic fairness auditor.**
 
-Built for the Teens in AI Global Challenge 2027 (Ages 13+, entries close 15 February 2027). TriageLens trains two real classifiers in the browser, calibrates their probabilities, and shows the exact mathematical trade-off between overall recall and subgroup fairness. All data is **synthetic** and generated inside the page. There are no real patient, student, or shelter records, no pilots, no analytics, no CDN, and no network requests.
+Built for the Teens in AI Global Challenge 2027 (Ages 13+, entries close 15 February 2027). TriageLens trains two real classifiers in the browser, calibrates their probabilities, and shows the exact mathematical trade-off between overall recall and subgroup fairness. All data is **synthetic** and generated inside the page. There are no real patient, student, or shelter records, no pilots, no analytics, no CDN, and no network requests. A restrictive Content Security Policy locks the page to its own files (`default-src 'none'`, `connect-src 'none'`), and the DOM is written only through `textContent` and DOM APIs.
 
 ## Run it
 
@@ -20,7 +20,7 @@ python3 -m http.server 8000
 There is no build step and no install. Run the full deterministic suite (the exact command used to verify the final counts below):
 
 ```bash
-node --test
+npm test        # or: node --test
 ```
 
 ## What it does
@@ -44,9 +44,9 @@ node --test
 `node --test` (Node v26.8.1):
 
 ```text
-ℹ tests 156
+ℹ tests 196
 ℹ suites 0
-ℹ pass 156
+ℹ pass 196
 ℹ fail 0
 ℹ cancelled 0
 ℹ skipped 0
@@ -107,6 +107,8 @@ src/app.js                 UI controller, exports, accessibility wiring
 tests/ml-engine.test.mjs   118 deterministic Node tests
 tests/wave2-regression.test.mjs  17 tests for statistical identities, CSV validation, demo wiring and UI rules
 tests/wave3-regression.test.mjs  21 tests for adversarial inputs, optimizer guards, Wilson intervals and honest reporting
+tests/wave4-regression.test.mjs  25 tests for formula-safe CSV export, fail-closed import, CSP integrity, XSS sinks and WCAG structure
+tests/wave5-regression.test.mjs  15 tests for order-invariant subgroup ids, header collisions, calibration softening, tree missing-value routing and ARIA consolidation
 video/narration.txt        2-5 minute demo narration
 video/steps.json           verified demo click/tap choreography
 ```

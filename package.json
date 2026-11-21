@@ -1,0 +1,11 @@
+{
+  "name": "triagelens",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Browser-local ML classifier, calibration and algorithmic fairness auditor on synthetic data.",
+  "scripts": {
+    "test": "node --test"
+  },
+  "license": "MIT"
+}

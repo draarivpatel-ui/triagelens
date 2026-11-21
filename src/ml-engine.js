@@ -175,7 +175,14 @@ export const DEFAULT_BIAS = 0.6;
 export const DEFAULT_SEED = 20270101;
 export const DEFAULT_TRAIN_FRACTION = 0.7;
 export const DEFAULT_N = 1400;
+export const MAX_N = 50000;
 export const DEFAULT_THRESHOLD = 0.35;
+
+/** Rows are synthetic; every export carries this statement. */
+export const DATA_STATEMENT =
+  'All rows are synthetic, seeded, and generated locally. No patient, student, ' +
+  'or shelter guest records exist. TriageLens is a teaching tool, never a ' +
+  'clinical, educational, or shelter-placement decision system.';
 
 function scenarioById(id) {
   return SCENARIOS.find((s) => s.id === id) || SCENARIOS[0];
@@ -260,11 +267,21 @@ export function generateDataset({
   const scenario = scenarioById(scenarioId);
   const rand = mulberry32((Number(seed) >>> 0) ^ 0x9e3779b9);
   const normal = normalSampler(rand);
-  const count = Math.max(20, Math.floor(n));
+  // Fail closed on non-finite sizes: new Array(NaN) throws, so a hostile or
+  // malformed option is replaced by the default rather than crashing.
+  const count = Number.isFinite(n)
+    ? Math.min(MAX_N, Math.max(20, Math.floor(n)))
+    : DEFAULT_N;
+  const split = Number.isFinite(trainFraction)
+    ? clamp(trainFraction, 0.05, 0.95)
+    : DEFAULT_TRAIN_FRACTION;
+  // Normalize bias once so the metadata below records exactly the value the
+  // generator applied, even when a hostile option arrives as a string.
+  const appliedBias = clamp(Number(bias), 0, 1);
   const rows = new Array(count);
   for (let i = 0; i < count; i++) rows[i] = drawRow(rand, normal, scenario);
   for (const row of rows) {
-    row.y = latentProbability(row, scenario) - labelBias(row, scenario, bias) > rand() ? 1 : 0;
+    row.y = latentProbability(row, scenario) - labelBias(row, scenario, appliedBias) > rand() ? 1 : 0;
   }
 
   const positives = rows.filter((r) => r.y === 1);
@@ -280,8 +297,8 @@ export function generateDataset({
   };
   shuffle(positives);
   shuffle(negatives);
-  const nTrainPos = Math.round(positives.length * trainFraction);
-  const nTrainNeg = Math.round(negatives.length * trainFraction);
+  const nTrainPos = Math.round(positives.length * split);
+  const nTrainNeg = Math.round(negatives.length * split);
   const train = positives.slice(0, nTrainPos).concat(negatives.slice(0, nTrainNeg));
   const test = positives.slice(nTrainPos).concat(negatives.slice(nTrainNeg));
   shuffle(train);
@@ -292,9 +309,11 @@ export function generateDataset({
   return {
     scenario: scenario.id,
     seed: Number(seed) >>> 0,
-    bias: Number(bias),
+    // Record the effective (clamped) bias so metadata matches what the
+    // generator actually applied.
+    bias: appliedBias,
     n: count,
-    trainFraction,
+    trainFraction: split,
     features: scenario.features.map((f) => ({ key: f.key, label: f.label })),
     subgroupKey: scenario.subgroupKey,
     groupLabels: { ...scenario.groupLabels },
@@ -403,9 +422,15 @@ function bestSplit(rows, keys, minLeaf) {
   const pos = rows.reduce((s, r) => s + r.y, 0);
   const parent = gini(pos, total);
   for (const key of keys) {
-    const values = rows.map((r) => r[key]);
-    const lo = Math.min(...values);
-    const hi = Math.max(...values);
+    // Loop, not Math.min(...spread): spread of a large column overflows the
+    // argument limit long before the row cap is reached.
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (const r of rows) {
+      const v = sanitizeNumber(r && r[key], 0);
+      if (v < lo) lo = v;
+      if (v > hi) hi = v;
+    }
     if (!(hi > lo)) continue;
     for (let q = 1; q < 12; q++) {
       const t = lo + ((hi - lo) * q) / 12;
@@ -435,7 +460,9 @@ function buildTree(rows, keys, depth, maxDepth, minLeaf) {
   if (!split) return { leaf: true, n, positives: pos, p: pos / n };
   const left = [];
   const right = [];
-  for (const r of rows) (r[split.key] <= split.threshold ? left : right).push(r);
+  // Rows missing the split feature go right deterministically; NaN never
+  // satisfies <= so null, undefined and unparsable values share one policy.
+  for (const r of rows) (treeFeature(r[split.key]) <= split.threshold ? left : right).push(r);
   return {
     leaf: false,
     key: split.key,
@@ -448,14 +475,30 @@ function buildTree(rows, keys, depth, maxDepth, minLeaf) {
   };
 }
 
+function treeFeature(v) {
+  return typeof v === 'number' && Number.isFinite(v) ? v : NaN;
+}
+
 function treeProba(node, row) {
   let cur = node;
-  while (!cur.leaf) cur = row[cur.key] <= cur.threshold ? cur.left : cur.right;
+  while (!cur.leaf) {
+    const v = treeFeature(row ? row[cur.key] : undefined);
+    if (!Number.isFinite(v)) {
+      // Missing feature: the best available estimate is this node's own
+      // prevalence rather than an arbitrary forced branch.
+      return clamp(cur.positives / cur.n || 0, 1e-6, 1 - 1e-6);
+    }
+    cur = v <= cur.threshold ? cur.left : cur.right;
+  }
   return clamp(cur.p, 1e-6, 1 - 1e-6);
 }
 
 function countLeaves(node) {
   return node.leaf ? 1 : countLeaves(node.left) + countLeaves(node.right);
+}
+
+function treeDepth(node) {
+  return node.leaf ? 0 : 1 + Math.max(treeDepth(node.left), treeDepth(node.right));
 }
 
 function collectRules(node) {
@@ -480,7 +523,7 @@ export function trainDecisionTree(rows, options = {}) {
   const minLeaf = options.minLeaf ?? 24;
   if (!rr.length) {
     const emptyTree = { leaf: true, n: 0, positives: 0, p: 0.5 };
-    return { kind: 'tree', keys: keys.slice(), tree: emptyTree, rules: [{ conditions: [], probability: 0.5, n: 0 }], leaves: 1, maxDepth, predictProba: () => 0.5, ms: nowMs() - started };
+    return { kind: 'tree', keys: keys.slice(), tree: emptyTree, rules: [{ conditions: [], probability: 0.5, n: 0 }], leaves: 1, maxDepth, depth: 0, predictProba: () => 0.5, ms: nowMs() - started };
   }
   const tree = buildTree(rr, keys, 0, maxDepth, minLeaf);
   return {
@@ -490,6 +533,7 @@ export function trainDecisionTree(rows, options = {}) {
     rules: collectRules(tree),
     leaves: countLeaves(tree),
     maxDepth,
+    depth: treeDepth(tree),
     predictProba(row) {
       return treeProba(tree, row);
     },
@@ -594,7 +638,7 @@ function binIndex(score, bins) {
 export function binStats(scores, ys, bins) {
   const bb = Number.isFinite(bins) && bins > 0 ? Math.floor(bins) : 10;
   const buckets = Array.from({ length: bb }, () => ({ n: 0, conf: 0, acc: 0 }));
-  const n = scores ? scores.length : 0;
+  const n = Math.min(scores ? scores.length : 0, ys ? ys.length : 0);
   for (let i = 0; i < n; i++) {
     const sc = sanitizeNumber(scores[i], 0);
     const y = sanitizeNumber(ys && ys[i], 0) ? 1 : 0;
@@ -608,8 +652,8 @@ export function binStats(scores, ys, bins) {
 }
 
 export function expectedCalibrationError(scores, ys, bins = 10) {
-  const n = scores ? scores.length : 0;
-  if (!n || !ys || !ys.length) return 0;
+  const n = Math.min(scores ? scores.length : 0, ys ? ys.length : 0);
+  if (!n) return 0;
   const bb = Number.isFinite(bins) && bins > 0 ? Math.floor(bins) : 10;
   return binStats(scores, ys, bb).reduce(
     (ece, g) => ece + (g.n / n) * (g.n ? Math.abs(g.acc - g.conf) / g.n : 0),
@@ -686,11 +730,12 @@ export function classMetrics(c) {
 export function overallMetrics(scores, ys, threshold) {
   const ss = Array.isArray(scores) ? scores : [];
   const yy = Array.isArray(ys) ? ys : [];
+  const n = Math.min(ss.length, yy.length);
   const c = classMetrics(confusion(ss, yy, threshold));
   return {
     threshold,
-    n: scores.length,
-    prevalence: mean(ys),
+    n,
+    prevalence: mean(yy.slice(0, n)),
     accuracy: c.accuracy,
     precision: c.precision,
     recall: c.recall,
@@ -707,9 +752,14 @@ export function overallMetrics(scores, ys, threshold) {
 
 export function subgroupMetrics(rows, scores, threshold, subgroupKey) {
   const rr = Array.isArray(rows) ? rows : [];
+  const ss = Array.isArray(scores) ? scores : [];
+  // Bound iteration by the paired inputs and default a non-finite threshold
+  // to 0.5, matching the bounds policy of overallMetrics/confusion.
+  const n = Math.min(rr.length, ss.length);
+  const th = Number.isFinite(threshold) ? threshold : 0.5;
   const ids = computeGroupIds(rr, subgroupKey);
   const byGroup = new Map();
-  for (let i = 0; i < rr.length; i++) {
+  for (let i = 0; i < n; i++) {
     const g = ids[i];
     if (!byGroup.has(g)) byGroup.set(g, []);
     byGroup.get(g).push(i);
@@ -719,8 +769,8 @@ export function subgroupMetrics(rows, scores, threshold, subgroupKey) {
     const s = { n: idx.length, positives: 0, selected: 0, tp: 0, fp: 0, tn: 0, fn: 0, conf: 0, acc: 0 };
     for (const i of idx) {
       const y = ysAt(rr, i) ? 1 : 0;
-      const sc = sanitizeNumber(scores && scores[i], 0);
-      const pred = sc >= threshold ? 1 : 0;
+      const sc = sanitizeNumber(ss[i], 0);
+      const pred = sc >= th ? 1 : 0;
       s.positives += y;
       s.selected += pred;
       s.conf += sc;
@@ -845,9 +895,10 @@ export function fitCalibration(scores, ys, options = {}) {
     if (fitIntercept) b -= (lr * gb) / n;
     loss = ll / n;
   }
-  // Never soften below temperature 1: in a well specified logistic model the
-  // fitted slope should not shrink confidence, and this keeps Brier monotone.
-  a = clamp(a, 1, 20);
+  // Slopes below 1 soften overconfident scores and are legitimate Platt fits;
+  // the Brier+ECE identity fallback below still rejects any fit that would be
+  // worse than doing nothing on the fitting split.
+  a = clamp(a, 0.05, 20);
   const apply = (p) => {
     const z = clamp(p, 1e-9, 1 - 1e-9);
     return sigmoid(a * Math.log(z / (1 - z)) + b);
@@ -1007,28 +1058,34 @@ function selectionAt(indices, scores, t) {
 }
 
 /**
- * Map each row to a stable integer group id. Finite numeric keys keep their
- * (truncated) value. Non-numeric keys, including CSV-style string labels such
- * as 'rural', get fresh ids above the largest numeric id in first-appearance
- * order, so string-labeled subgroups form real groups instead of silently
- * collapsing into group 0.
+ * Map each row to a stable group id. Finite numeric keys keep their exact
+ * value (no truncation, so fractional subgroups stay distinct) and -0 is
+ * normalized to 0. Non-numeric keys, including CSV-style string labels such
+ * as 'rural', get ids above the largest numeric id in sorted label order:
+ * the same label always lands on the same id no matter which array (train
+ * or test) is scanned first, so a fitted threshold map can never swap
+ * groups between arrays.
  */
 function computeGroupIds(rows, subgroupKey) {
   const ids = new Array(rows.length);
-  let maxNum = -1;
-  for (let i = 0; i < rows.length; i++) {
-    const raw = rows[i] ? rows[i][subgroupKey] : undefined;
-    if (Number.isFinite(raw)) maxNum = Math.max(maxNum, raw | 0);
-  }
-  const extra = new Map();
-  for (let i = 0; i < rows.length; i++) {
-    const raw = rows[i] ? rows[i][subgroupKey] : undefined;
+  let maxNum = 0;
+  let hasNum = false;
+  const labels = new Set();
+  for (const row of rows) {
+    const raw = row ? row[subgroupKey] : undefined;
     if (Number.isFinite(raw)) {
-      ids[i] = raw | 0;
-      continue;
+      hasNum = true;
+      if (raw > maxNum) maxNum = raw;
+    } else {
+      labels.add(raw);
     }
-    if (!extra.has(raw)) extra.set(raw, maxNum + 1 + extra.size);
-    ids[i] = extra.get(raw);
+  }
+  const sorted = [...labels].sort((a, b) => (String(a) < String(b) ? -1 : 1));
+  const base = hasNum ? Math.floor(maxNum) + 1 : 0;
+  const extra = new Map(sorted.map((v, i) => [v, base + i]));
+  for (let i = 0; i < rows.length; i++) {
+    const raw = rows[i] ? rows[i][subgroupKey] : undefined;
+    ids[i] = Number.isFinite(raw) ? (raw === 0 ? 0 : raw) : extra.get(raw);
   }
   return ids;
 }
@@ -1062,7 +1119,7 @@ export function fitGroupThresholds(rows, scores, options = {}) {
   const byGroup = groupIndices(rr, subgroupKey);
   const ids = [...byGroup.keys()].sort((a, b) => a - b);
   if (ids.length < 2) {
-    return { thresholds: ids.length ? { [ids[0]]: reference } : {}, goal: 0, perGroup: {} };
+    return { thresholds: ids.length ? { [ids[0]]: reference } : {}, goal: 0, perGroup: {}, guards: {} };
   }
 
   const perGroup = {};
@@ -1258,7 +1315,7 @@ function strategyWithThresholds(id, label, blurb, rows, scores, thresholds, subg
     thresholds: { ...thresholds },
     metrics: {
       threshold: { ...thresholds },
-      n: rows.length,
+      n: rr.length,
       prevalence: mean(ys),
       accuracy: overall.accuracy,
       precision: overall.precision,
@@ -1298,10 +1355,12 @@ export function runAudit(options = {}) {
   const started = nowMs();
   const scenario = scenarioById(options.scenarioId || 'clinic');
   const seed = options.seed ?? DEFAULT_SEED;
-  const bias = clamp(options.bias ?? DEFAULT_BIAS, 0, 1);
+  const bias = Number.isFinite(options.bias) ? clamp(options.bias, 0, 1) : DEFAULT_BIAS;
   const n = options.n ?? DEFAULT_N;
   const trainFraction = options.trainFraction ?? DEFAULT_TRAIN_FRACTION;
-  const threshold = options.threshold ?? DEFAULT_THRESHOLD;
+  const threshold = Number.isFinite(options.threshold)
+    ? clamp(options.threshold, 0, 1)
+    : DEFAULT_THRESHOLD;
   const featureKeys = options.featureKeys || scenario.features.map((f) => f.key);
 
   const data = generateDataset({ scenarioId: scenario.id, seed, bias, n, trainFraction });
@@ -1357,7 +1416,7 @@ export function runAudit(options = {}) {
   );
 
   const proxyKeys = featureKeys.filter((k) => k !== scenario.proxyKey);
-  const lrNoProxy = trainLogisticRegression(train, { featureKeys: proxyKeys, l2: options.l2 ?? 0.02 });
+  const lrNoProxy = trainLogisticRegression(train, { featureKeys: proxyKeys, l2: options.l2 ?? 0.02, epochs: options.epochs ?? 400, lr: options.lr });
   const noProxyTrainRaw = train.map((r) => lrNoProxy.predictProba(r));
   // The no-proxy model needs its OWN train-only calibration: borrowing the full
   // model's mapping would evaluate it in the wrong probability space.
@@ -1421,7 +1480,7 @@ export function runAudit(options = {}) {
   });
 
   const majorityClass = mean(ys) > 0.5 ? 1 : 0;
-  const majorityBaseline = ys.filter((y) => y === majorityClass).length / ys.length;
+  const majorityBaseline = ys.filter((y) => y === majorityClass).length / Math.max(1, ys.length);
   // Leaf probabilities are class frequencies, so report tree accuracy at the
   // conventional 0.5 cut-off rather than the logistic policy threshold.
   const treeMetrics = overallMetrics(treeTest, ys, 0.5);
@@ -1433,10 +1492,11 @@ export function runAudit(options = {}) {
     positiveLabel: scenario.positive,
     outcomeNote: scenario.outcomeNote,
     ethics: scenario.ethics,
-    seed,
-    bias,
-    n,
-    trainFraction,
+    disclaimer: DATA_STATEMENT,
+    seed: data.seed,
+    bias: data.bias,
+    n: data.n,
+    trainFraction: data.trainFraction,
     threshold,
     trainCount: train.length,
     testCount: test.length,
@@ -1470,7 +1530,7 @@ export function runAudit(options = {}) {
         brier: treeMetrics.brier,
         ece: treeMetrics.ece,
         leaves: tree.leaves,
-        depth: tree.maxDepth,
+        depth: tree.depth ?? tree.maxDepth,
         rules: tree.rules,
         ms: tree.ms
       }
@@ -1528,7 +1588,10 @@ export function runAudit(options = {}) {
 
 /** Minimal but robust CSV parser. Returns { headers, rows, skipped }. */
 export function parseCsv(text) {
-  const input = text == null ? '' : String(text);
+  let input = text == null ? '' : String(text);
+  // A UTF-8 byte-order mark would otherwise fuse into the first header and
+  // fail required-key validation on a perfectly valid file.
+  if (input.charCodeAt(0) === 0xfeff) input = input.slice(1);
   const records = [];
   let field = '';
   let row = [];
@@ -1566,13 +1629,23 @@ export function parseCsv(text) {
   // Duplicate headers get deterministic suffixes so no column's data is lost,
   // and the collision is reported instead of merged silently.
   const seen = new Map();
+  const used = new Set();
   const duplicates = [];
   const headers = rawHeaders.map((h) => {
     const count = seen.get(h) || 0;
     seen.set(h, count + 1);
-    if (!count) return h;
+    if (!count) {
+      used.add(h);
+      return h;
+    }
     if (count === 1) duplicates.push(h);
-    return h + '__' + (count + 1);
+    // The suffixed name can itself collide with a literal header ('a,a__2,a'),
+    // so keep incrementing until the column keeps its own data.
+    let k = count + 1;
+    let candidate = h + '__' + k;
+    while (used.has(candidate)) candidate = h + '__' + (++k);
+    used.add(candidate);
+    return candidate;
   });
   const rows = [];
   let skipped = 0;
@@ -1601,6 +1674,7 @@ export function validateCsvRows(rows, requiredKeys = [], probabilityKeys = []) {
   const required = Array.isArray(requiredKeys) ? requiredKeys : [];
   const probs = Array.isArray(probabilityKeys) ? probabilityKeys : [];
   const errors = [];
+  if (!rr.length) errors.push({ row: 0, key: 'rows', message: 'no data rows' });
   rr.forEach((row, idx) => {
     for (const key of required) {
       if (row == null || row[key] == null || row[key] === '') errors.push({ row: idx + 1, key, message: 'missing ' + key });
@@ -1620,13 +1694,41 @@ export function sanitizeRow(row, defaults = {}) {
   const out = { ...defaults };
   if (!row || typeof row !== 'object') return out;
   for (const [k, v] of Object.entries(row)) {
-    if (v === null || v === undefined || (typeof v === 'number' && !Number.isFinite(v))) {
-      out[k] = defaults[k] != null ? defaults[k] : 0;
-    } else {
-      out[k] = v;
-    }
+    const clean = (v === null || v === undefined || (typeof v === 'number' && !Number.isFinite(v)))
+      ? (defaults[k] != null ? defaults[k] : 0)
+      : v;
+    // Same rule as parseCsv: a literal '__proto__' key holds data, it must
+    // never reach the setter and rewrite this object's prototype.
+    if (k === '__proto__') Object.defineProperty(out, k, { value: clean, enumerable: true, writable: true, configurable: true });
+    else out[k] = clean;
   }
   return out;
+}
+
+/**
+ * RFC 4180 CSV cell. Strings that could be read as a spreadsheet formula
+ * (leading =, +, -, @, tab or CR) are prefixed with a single quote, so a
+ * hostile or odd value can never execute when the file is opened in a
+ * spreadsheet application.
+ */
+export function csvCell(value) {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'number') return Number.isFinite(value) ? String(value) : '';
+  let s = String(value);
+  if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
+  if (/[",\n\r]/.test(s)) s = '"' + s.replace(/"/g, '""') + '"';
+  return s;
+}
+
+/** Serialize an array of flat objects to RFC 4180 CSV text. */
+export function toCsv(rows, columns) {
+  const list = Array.isArray(rows) ? rows : [];
+  const cols = Array.isArray(columns) && columns.length
+    ? columns
+    : (list.length ? Object.keys(list[0]) : []);
+  const lines = [cols.map(csvCell).join(',')];
+  for (const row of list) lines.push(cols.map((c) => csvCell(row ? row[c] : '')).join(','));
+  return lines.join('\r\n');
 }
 
 /** Flatten strategy metrics for CSV or JSON export. */

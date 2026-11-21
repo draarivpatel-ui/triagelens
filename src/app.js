@@ -1,5 +1,5 @@
 /* TriageLens UI controller. ES module, zero dependencies, no network access. */
-import { runAudit, exportAudit, SCENARIOS, formatGapChange, tradeoffNotes } from './ml-engine.js';
+import { runAudit, exportAudit, toCsv, SCENARIOS, formatGapChange, tradeoffNotes, DATA_STATEMENT } from './ml-engine.js';
 import { drawRoc, drawReliability, drawDisparity, drawLoss } from './charts.js';
 
 const $ = (id) => document.getElementById(id);
@@ -221,8 +221,14 @@ function renderCounterexamples(audit) {
     card.type = 'button';
     card.className = 'case-card';
     card.setAttribute('aria-expanded', 'false');
+    // Concise accessible name; the full detail text lives in the expanded
+    // body so the button's name does not read as a paragraph.
+    card.setAttribute('aria-label',
+      'Held-out case ' + c.id + ', ' + c.groupLabel + ', ' + pct(c.score) + ' support score, missed globally');
 
-    const head = document.createElement('div');
+    // A button may only hold phrasing content: every inner element is a span
+    // styled as a block, keeping the markup valid for assistive tech.
+    const head = document.createElement('span');
     head.className = 'case-head';
     const idSpan = document.createElement('span');
     idSpan.textContent = 'Held-out case #' + c.id;
@@ -231,13 +237,13 @@ function renderCounterexamples(audit) {
     badge.textContent = 'missed globally';
     head.append(idSpan, badge);
 
-    const title = document.createElement('p');
+    const title = document.createElement('span');
     title.className = 'case-title';
     title.textContent = pct(c.score) + ' support score';
-    const sub = document.createElement('p');
+    const sub = document.createElement('span');
     sub.className = 'case-sub';
     sub.textContent = c.groupLabel + ' | global threshold predicted no support';
-    const flips = document.createElement('div');
+    const flips = document.createElement('span');
     flips.className = 'case-flips';
     for (const flip of c.flips) {
       const tag = document.createElement('span');
@@ -245,10 +251,10 @@ function renderCounterexamples(audit) {
       tag.textContent = flip.label;
       flips.append(tag);
     }
-    const detail = document.createElement('div');
+    const detail = document.createElement('span');
     detail.className = 'case-detail';
     for (const [key, value] of Object.entries(c.features)) {
-      const row = document.createElement('div');
+      const row = document.createElement('span');
       row.className = 'case-feature';
       const k = document.createElement('span');
       k.textContent = key;
@@ -257,9 +263,8 @@ function renderCounterexamples(audit) {
       row.append(k, v);
       detail.append(row);
     }
-    const explain = document.createElement('p');
-    explain.className = 'case-sub';
-    explain.style.marginTop = '10px';
+    const explain = document.createElement('span');
+    explain.className = 'case-sub case-explain';
     explain.textContent = 'True label: needs support. Mitigation threshold: ' +
       c.flips.map((f) => f.label + ' ' + f.threshold.toFixed(2)).join(', ') + '.';
     detail.append(explain);
@@ -320,6 +325,22 @@ function renderCharts(audit) {
   drawLoss($('loss-canvas'), audit.models.lr.loss);
   $('roc-sub').textContent = audit.testCount + ' held-out rows, AUC ' + num(audit.models.lr.auc);
   $('reliability-sub').textContent = '10 bins, ECE ' + num(audit.baseline.metrics.ece);
+  // Text equivalent of the disparity chart's tooltip-only numbers, kept in
+  // sync with every render so keyboard and screen-reader users get the same
+  // per-group rates without hovering.
+  const parts = [];
+  for (const s of audit.strategies) {
+    const g = s.metrics.groups;
+    const a = g.groups && g.groups.length ? g.groups[0] : null;
+    const b = g.groups && g.groups.length > 1 ? g.groups[g.groups.length - 1] : a;
+    if (a === null || b === null || !g.groupA) continue;
+    const la = (audit.groupLabels && audit.groupLabels[a]) || 'group ' + a;
+    const lb = (audit.groupLabels && audit.groupLabels[b]) || 'group ' + b;
+    parts.push(s.label + ': ' + la + ' TPR ' + pct(g.groupA.tpr) + ' FNR ' + pct(g.groupA.fnr) +
+      '; ' + lb + ' TPR ' + pct(g.groupB.tpr) + ' FNR ' + pct(g.groupB.fnr) + '.');
+  }
+  $('disparity-canvas').setAttribute('aria-label',
+    'Bar chart of true positive and false negative rates by subgroup and policy. ' + parts.join(' '));
 }
 
 function download(name, text, type) {
@@ -370,10 +391,9 @@ function wire() {
   });
   $('export-csv').addEventListener('click', () => {
     if (!state.audit) return;
-    const rows = exportAudit(state.audit);
-    const cols = Object.keys(rows[0]);
-    const csv = [cols.join(',')].concat(rows.map((r) => cols.map((c) => JSON.stringify(r[c])).join(','))).join('\n');
-    download('triage-lens-strategies.csv', csv, 'text/csv');
+    // The JSON export carries audit.disclaimer; the CSV gets the same
+    // synthetic-data statement as a leading comment row.
+    download('triage-lens-strategies.csv', '# ' + DATA_STATEMENT.replace(/\s+/g, ' ') + '\r\n' + toCsv(exportAudit(state.audit)), 'text/csv');
     toast('Strategy CSV exported locally.');
   });
   window.addEventListener('resize', () => { if (state.audit) renderCharts(state.audit); });

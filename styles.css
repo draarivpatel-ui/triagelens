@@ -362,8 +362,9 @@ canvas { display: block; width: 100%; height: auto; background: transparent; }
 .case-card:hover { border-color: var(--accent); box-shadow: var(--shadow); }
 .case-head { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--ink-faint); }
 .case-badge { background: var(--clay-soft); color: var(--clay); border-radius: 999px; padding: 3px 9px; font-size: 10px; font-weight: 750; }
-.case-title { font-family: var(--serif); font-size: 18px; margin: 10px 0 4px; }
-.case-sub { font-size: 12px; color: var(--ink-soft); margin: 0 0 12px; }
+.case-title { display: block; font-family: var(--serif); font-size: 18px; margin: 10px 0 4px; }
+.case-sub { display: block; font-size: 12px; color: var(--ink-soft); margin: 0 0 12px; }
+.case-explain { margin-top: 10px; }
 .case-flips { display: flex; flex-wrap: wrap; gap: 6px; }
 .case-flip { font-size: 10px; font-weight: 650; background: var(--accent-soft); color: var(--accent-ink); border-radius: 5px; padding: 4px 7px; }
 .case-detail { display: none; margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--line-strong); }
@@ -436,7 +437,6 @@ canvas { display: block; width: 100%; height: auto; background: transparent; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  html { scroll-behavior: auto; }
   .button:hover { transform: none; }
 }
 

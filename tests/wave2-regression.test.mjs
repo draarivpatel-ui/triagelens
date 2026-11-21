@@ -221,7 +221,7 @@ test('demo renders a dramatic exact-number headline with no tagline under a titl
 test('no em/en dashes, small all-caps eyebrows, or smooth-scroll rule', () => {
   for (const f of ['index.html', 'styles.css', 'src/app.js', 'src/charts.js', 'README.md']) {
     const text = read(f);
-    assert.ok(!text.includes('—') && !text.includes('–'), f + ' contains an em/en dash');
+    assert.ok(!text.includes('\u2014') && !text.includes('\u2013'), f + ' contains an em/en dash');
   }
   const css = read('styles.css');
   assert.doesNotMatch(css, /scroll-behavior:\s*smooth/);
