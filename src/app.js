@@ -1,9 +1,19 @@
 /* TriageLens UI controller. ES module, zero dependencies, no network access. */
 import { runAudit, exportAudit, toCsv, SCENARIOS, formatGapChange, tradeoffNotes, DATA_STATEMENT } from './ml-engine.js';
 import { drawRoc, drawReliability, drawDisparity, drawLoss } from './charts.js';
+import { drawReliabilitySvg, drawFrontierSvg, frontierLegend } from './svg-charts.js';
+import {
+  buildCertificate,
+  certificateJson,
+  certificateCsv,
+  certificateMarkdown,
+  encodeAuditParams,
+  decodeAuditParams,
+  runSelfTests
+} from './audit-cert.js';
 
 const $ = (id) => document.getElementById(id);
-const state = { audit: null, timer: null };
+const state = { audit: null, cert: null, timer: null };
 const pct = (x) => (x * 100).toFixed(1) + '%';
 const num = (x, d = 3) => Number(x).toFixed(d);
 
@@ -21,7 +31,10 @@ function run() {
   const scenarioId = $('scenario').value;
   const bias = Number($('bias').value);
   const threshold = Number($('threshold').value);
-  const seed = Math.max(1, Math.floor(Number($('seed').value) || 1));
+  const seed = Math.min(999999999, Math.max(1, Math.floor(Number($('seed').value) || 1)));
+  // Write the clamped value back so the field, the run, the URL hash and
+  // any copied share link all carry the seed the audit actually used.
+  $('seed').value = String(seed);
 
   $('bias-value').textContent = bias.toFixed(2);
   $('threshold-value').textContent = threshold.toFixed(2);
@@ -32,6 +45,8 @@ function run() {
   const audit = runAudit({ scenarioId, bias, threshold, seed });
   const wallMs = performance.now() - t0;
   state.audit = audit;
+  state.cert = buildCertificate(audit);
+  updateHash({ scenario: scenarioId, bias, threshold, seed });
 
   renderHero(audit, wallMs);
   renderMetrics(audit);
@@ -43,6 +58,8 @@ function run() {
   renderEthics(audit);
   renderCharts(audit);
   renderHidden(audit);
+  renderWorkbench(audit);
+  renderCertificate();
 }
 
 function renderHero(audit, wallMs) {
@@ -343,6 +360,185 @@ function renderCharts(audit) {
     'Bar chart of true positive and false negative rates by subgroup and policy. ' + parts.join(' '));
 }
 
+/* ------------------------------------------------------------------ */
+/* Calibration workbench                                               */
+/* ------------------------------------------------------------------ */
+
+function ciText(ci, format) {
+  const f = format || pct;
+  return ci ? ' (' + f(ci.lo) + ' to ' + f(ci.hi) + ')' : '';
+}
+
+function renderWorkbench(audit) {
+  const wb = audit.workbench;
+  if (!wb) return;
+  const u = wb.uncertainty;
+  $('relwb-sub').textContent =
+    'ECE ' + num(u.ece) + ', MCE ' + num(u.mce) + ', Brier ' + num(u.brier);
+  $('frontier-sub').textContent = wb.frontier.points.length + ' achievable operating points';
+  drawReliabilitySvg($('reliability-svg'), {
+    bins: wb.bins,
+    overlay: wb.groupOverlay,
+    groupLabels: audit.groupLabels,
+    showOverlay: $('overlay-groups').checked,
+    onHover: (text) => {
+      $('relwb-caption').textContent = text ||
+        'ECE ' + num(u.ece) + ' (weighted mean bin gap), worst bin ' + num(u.mce) +
+        '. Stems show the gap to perfect calibration; whiskers are Wilson 95% intervals.';
+    }
+  });
+  drawFrontierSvg($('frontier-svg'), {
+    points: wb.frontier.points,
+    byGroup: wb.frontier.byGroup,
+    groupLabels: audit.groupLabels,
+    policyPoints: wb.frontier.policyPoints,
+    onHover: (text) => {
+      $('frontier-caption').textContent = text ||
+        'Each point is a threshold: alerts per 100 held-out records vs missed positives per 100.';
+    }
+  });
+  const legend = $('frontier-legend');
+  legend.replaceChildren();
+  for (const item of frontierLegend(wb.frontier.policyPoints, audit.groupLabels)) {
+    const li = document.createElement('li');
+    const sw = document.createElement('span');
+    sw.className = 'swatch' + (item.marker ? ' marker' : '');
+    if (item.dash) sw.style.borderTop = '2px dashed ' + item.color;
+    else sw.style.background = item.color;
+    li.append(sw, document.createTextNode(item.label));
+    legend.append(li);
+  }
+  renderComparator(audit);
+  renderSlices(audit);
+}
+
+function signedDelta(v, isCount) {
+  if (isCount) return (v > 0 ? '+' : '') + v;
+  return (v > 0 ? '+' : '') + (v * 100).toFixed(1) + ' pp';
+}
+
+function deltaClass(v) {
+  if (v > 0.0005 || v >= 1) return 'delta-worse';
+  if (v < -0.0005 || v <= -1) return 'delta-better';
+  return 'delta-flat';
+}
+
+function renderComparator(audit) {
+  const tbody = $('comparator-rows');
+  tbody.replaceChildren();
+  const comp = audit.workbench.comparator;
+  for (const p of comp.policies) {
+    const tr = document.createElement('tr');
+    const nameCell = document.createElement('td');
+    nameCell.className = 'policy-name';
+    nameCell.append(document.createTextNode(p.label));
+    const small = document.createElement('small');
+    small.textContent = p.blurb + ' Fitted: ' + p.fittedNote + '.';
+    nameCell.append(small);
+    tr.append(nameCell);
+
+    const thrText = typeof p.threshold === 'number'
+      ? p.threshold.toFixed(3)
+      : Object.entries(p.threshold)
+          .map(([g, t]) => (audit.groupLabels[g] || 'G' + g) + ' ' + Number(t).toFixed(3))
+          .join(' | ');
+    const thrCell = document.createElement('td');
+    thrCell.className = 'policy-thr';
+    thrCell.textContent = thrText;
+    tr.append(thrCell);
+
+    const cells = [
+      { text: pct(p.eval.recall), cls: '' },
+      { text: signedDelta(p.deltas.missed, true), cls: deltaClass(p.deltas.missed) },
+      { text: signedDelta(p.deltas.alerts, true), cls: deltaClass(p.deltas.alerts) },
+      { text: pct(p.eval.gaps.equalOpportunity), cls: '' },
+      { text: pct(p.eval.gaps.fnr), cls: '' },
+      { text: pct(p.eval.gaps.ppv), cls: '' },
+      { text: num(p.eval.decisionGap), cls: '' }
+    ];
+    for (const c of cells) {
+      const td = document.createElement('td');
+      td.textContent = c.text;
+      if (c.cls) td.className = c.cls;
+      tr.append(td);
+    }
+    tbody.append(tr);
+  }
+  const floorP = comp.policies.find((p) => p.id === 'sensitivity-floor');
+  const noteParts = [
+    'Deltas are exact held-out count changes vs the single global threshold: missed is false negatives, alerts is every flagged record.'
+  ];
+  if (floorP) {
+    noteParts.push(
+      'The ' + Math.round(comp.floor * 100) + '% sensitivity floor ' +
+      (floorP.deltas.missed <= 0 ? 'recovers ' + (-floorP.deltas.missed) + ' missed case' + (-floorP.deltas.missed === 1 ? '' : 's') : 'misses ' + floorP.deltas.missed + ' more') +
+      ' at the cost of ' + (floorP.deltas.alerts >= 0 ? '+' : '') + floorP.deltas.alerts + ' alerts held out.'
+    );
+  }
+  $('comparator-note').textContent = noteParts.join(' ');
+}
+
+function renderSlices(audit) {
+  const tbody = $('slices-rows');
+  tbody.replaceChildren();
+  const slices = audit.workbench.slices;
+  for (const c of slices.cells) {
+    const tr = document.createElement('tr');
+    if (c.smallCell) tr.className = 'smallcell';
+    const cells = [
+      { text: c.label, cls: 'policy-name' },
+      { text: String(c.n), cls: '' },
+      { text: pct(c.fnr) + ciText(c.fnrCi), cls: '' },
+      { text: pct(c.selectionRate), cls: '' },
+      { text: pct(c.ppv) + ciText(c.ppvCi), cls: '' },
+      { text: c.smallCell ? 'small cell' : 'ok', cls: c.smallCell ? 'flag-warn' : 'flag-ok' }
+    ];
+    for (const cd of cells) {
+      const td = document.createElement('td');
+      td.textContent = cd.text;
+      if (cd.cls) td.className = cd.cls;
+      tr.append(td);
+    }
+    tbody.append(tr);
+  }
+  $('slices-note').textContent = slices.warnings.length
+    ? 'Small-cell warnings: ' + slices.warnings.join('; ') + '. The second axis is ' +
+      (slices.second ? slices.second.dimension : 'a scenario feature') + ', cut at a fixed stated point.'
+    : 'Every intersectional cell has n >= ' + slices.minN + '. The second axis is ' +
+      (slices.second ? slices.second.dimension : 'a scenario feature') + ', cut at a fixed stated point.';
+}
+
+/* ------------------------------------------------------------------ */
+/* Certificate, self tests and bookmarking                             */
+/* ------------------------------------------------------------------ */
+
+function renderCertificate() {
+  if (!state.cert) return;
+  $('cert-hash').textContent = state.cert.sha256;
+  $('cert-sub').textContent =
+    state.cert.input.scenario + ', seed ' + state.cert.input.seed + ', bias ' + state.cert.input.bias +
+    ', threshold ' + state.cert.input.threshold + ', ' + state.cert.evidence.heldOutRows + ' held-out rows. Recomputed in this page.';
+}
+
+function updateHash(params) {
+  try {
+    const frag = encodeAuditParams(params);
+    if (location.hash !== '#' + frag) history.replaceState(null, '', '#' + frag);
+  } catch {
+    // History API can be blocked in odd embeds; the audit still runs.
+  }
+}
+
+function applyHash() {
+  const decoded = decodeAuditParams(location.hash || '');
+  if (!decoded) return false;
+  $('scenario').value = decoded.scenario;
+  $('bias').value = String(decoded.bias);
+  $('threshold').value = String(decoded.threshold);
+  $('seed').value = String(decoded.seed);
+  return true;
+}
+
 function download(name, text, type) {
   const blob = new Blob([text], { type });
   const url = URL.createObjectURL(blob);
@@ -382,7 +578,10 @@ function wire() {
   $('theme-toggle').addEventListener('click', () => {
     const dark = document.documentElement.getAttribute('data-theme') === 'dark';
     document.documentElement.setAttribute('data-theme', dark ? 'light' : 'dark');
-    if (state.audit) renderCharts(state.audit);
+    if (state.audit) {
+      renderCharts(state.audit);
+      renderWorkbench(state.audit);
+    }
   });
   $('export-json').addEventListener('click', () => {
     if (!state.audit) return;
@@ -396,8 +595,69 @@ function wire() {
     download('triage-lens-strategies.csv', '# ' + DATA_STATEMENT.replace(/\s+/g, ' ') + '\r\n' + toCsv(exportAudit(state.audit)), 'text/csv');
     toast('Strategy CSV exported locally.');
   });
+  $('overlay-groups').addEventListener('change', () => { if (state.audit) renderWorkbench(state.audit); });
+  $('cert-json').addEventListener('click', () => {
+    if (!state.cert) return;
+    download('triage-lens-certificate.json', certificateJson(state.cert), 'application/json');
+    toast('Certificate JSON exported locally.');
+  });
+  $('cert-csv').addEventListener('click', () => {
+    if (!state.cert) return;
+    download('triage-lens-certificate.csv', certificateCsv(state.cert), 'text/csv');
+    toast('Certificate CSV exported locally.');
+  });
+  $('cert-md').addEventListener('click', () => {
+    if (!state.cert) return;
+    download('triage-lens-certificate.md', certificateMarkdown(state.cert), 'text/markdown');
+    toast('Markdown report exported locally.');
+  });
+  $('copy-link').addEventListener('click', async () => {
+    // Build the link from the inputs the current run actually used, not
+    // location.href (in-page anchors can replace the audit hash) and not
+    // the raw fields (an unclamped seed would encode a different audit).
+    const frag = encodeAuditParams(state.cert.input);
+    const url = location.href.split('#')[0] + '#' + frag;
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(url);
+        toast('Share link copied.');
+      } else {
+        toast('Copy the URL from the address bar to share this audit.');
+      }
+    } catch {
+      toast('Copy the URL from the address bar to share this audit.');
+    }
+  });
+  $('run-selftests').addEventListener('click', () => {
+    const t0 = performance.now();
+    const checks = runSelfTests(state.audit);
+    const ms = Math.round(performance.now() - t0);
+    const list = $('selftest-list');
+    list.replaceChildren();
+    let passed = 0;
+    for (const c of checks) {
+      const li = document.createElement('li');
+      const mark = document.createElement('span');
+      mark.className = 'st-mark ' + (c.pass ? 'st-pass' : 'st-fail');
+      mark.textContent = c.pass ? '✓' : '✗';
+      const name = document.createElement('span');
+      name.textContent = c.name;
+      const detail = document.createElement('span');
+      detail.className = 'st-detail';
+      detail.textContent = c.detail;
+      li.append(mark, name, detail);
+      list.append(li);
+      if (c.pass) passed++;
+    }
+    $('selftest-summary').textContent =
+      passed + ' of ' + checks.length + ' checks passed in ' + ms + ' ms, inside this page.';
+  });
+  window.addEventListener('hashchange', () => {
+    if (applyHash()) run();
+  });
   window.addEventListener('resize', () => { if (state.audit) renderCharts(state.audit); });
 }
 
 wire();
+applyHash();
 run();

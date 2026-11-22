@@ -226,7 +226,7 @@ test('index.html keeps the skip link target focusable', () => {
 });
 
 test('no shipped file uses innerHTML, eval or document.write', () => {
-  for (const f of ['../index.html', '../src/app.js', '../src/ml-engine.js', '../src/charts.js']) {
+  for (const f of ['../index.html', '../src/app.js', '../src/ml-engine.js', '../src/charts.js', '../src/calibration.js', '../src/audit-cert.js', '../src/svg-charts.js']) {
     const text = readFileSync(here + f, 'utf8');
     assert.ok(!/innerHTML|outerHTML|insertAdjacentHTML|document\.write|eval\s*\(|new Function/.test(text), f);
   }

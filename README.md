@@ -37,21 +37,25 @@ npm test        # or: node --test
 5. **Exact held-out metrics**: accuracy, precision, recall, F1, ROC-AUC, Brier score with a reliability - resolution + uncertainty decomposition, 10-bin ECE, plus per-subgroup selection rate (demographic parity gap), TPR (equal opportunity gap), FNR disparity, FPR gap, PPV/NPV gaps, and subgroup calibration error. Every disparity is the worst gap across all subgroup pairs, so a third subgroup can never hide between two displayed extremes. Each subgroup TPR, FNR and selection rate carries a Wilson 95% confidence interval so small-sample error rates stay honestly uncertain. ROC-AUC uses standard Mann-Whitney half-credit tie handling; the CSV validator rejects out-of-range probabilities, and charts expose hover tooltips.
 6. **Explicit trade-off reporting**: a live banner names every mitigation that lowers overall recall or widens a secondary gap (including the FPR gap), so no cost is hidden.
 7. **Counterexample inspector**: specific held-out positives from the harmed subgroup that the global threshold misses but a mitigation recovers.
-8. **Model card and ethics panel**: who benefits, who could be harmed, likely failure modes, and why a human must decide.
+8. **Calibration and uncertainty workbench**: an interactive SVG reliability diagram with per-bin Wilson 95% intervals, ECE, MCE and the Brier decomposition, plus a subgroup overlay. A clinical-utility frontier plots the achievable trade-off between alert volume and missed cases across every candidate threshold.
+9. **Four-way threshold policy comparator**: a single global threshold, a sensitivity-floor guardrail (fitted to at least 90% train recall), subgroup-calibrated thresholds matching train selection to train prevalence, and a Youden-J optimum. Every policy is fitted on train rows only and evaluated on held-out rows; the table shows exact deltas vs the global threshold in missed cases and total alert volume, the absolute EO, FNR and PPV gaps, and the alert-conditional calibration gap (absolute difference between the observed hit rate and the mean stated risk among alerted rows), with the fitting provenance printed on each row.
+10. **Intersectional slices**: two-way subgroup cells (protected group x a second scenario dimension) with cell size, missed-rate and PPV Wilson intervals, alert rate, and an automatic small-cell warning below n=30.
+11. **Audit certificate + URL bookmarks + in-page self-tests**: a pure-JS SHA-256 integrity digest over the canonical audit inputs and outputs, downloadable as JSON, formula-safe CSV or a Markdown report. The whole control state encodes into `#audit=...` so any run can be shared and reloaded deterministically. A self-test runner verifies the math in-page: ECE bounds, the Brier identity, Wilson ordering, threshold monotonicity, the small-cell guard and the FIPS 180-4 known-answer vectors. To recompute the digest: remove `sha256` from the JSON, sort every object's keys at every depth, compact `JSON.stringify`, UTF-8 encode, SHA-256 hex.
+12. **Model card and ethics panel**: who benefits, who could be harmed, likely failure modes, and why a human must decide.
 
 ## Observed benchmark output
 
 `node --test` (Node v26.8.1):
 
 ```text
-ℹ tests 196
+ℹ tests 363
 ℹ suites 0
-ℹ pass 196
+ℹ pass 363
 ℹ fail 0
 ℹ cancelled 0
 ℹ skipped 0
 ℹ todo 0
-ℹ duration_ms ~2200 (indicative)
+ℹ duration_ms ~5900 (indicative)
 ```
 
 `runAudit()` at seed 20270101, bias 0.60, threshold 0.35, n = 1400 (all numbers below are generated directly from live code output; timings are indicative only and vary by machine):
@@ -102,6 +106,9 @@ Selection-rate mitigation picks per-group thresholds nearest a selection target 
 index.html                 markup and accessible structure
 styles.css                 editorial light/dark theme, responsive layout
 src/ml-engine.js           PRNG, generators, models, calibration, fairness, metrics
+src/calibration.js         MCE, Wilson-covered bins, slices, policy fitting, frontier
+src/audit-cert.js          pure-JS SHA-256, certificate, URL bookmark, self-tests
+src/svg-charts.js          interactive SVG reliability and frontier charts
 src/charts.js              Canvas ROC, reliability, disparity, loss charts
 src/app.js                 UI controller, exports, accessibility wiring
 tests/ml-engine.test.mjs   118 deterministic Node tests
@@ -109,6 +116,9 @@ tests/wave2-regression.test.mjs  17 tests for statistical identities, CSV valida
 tests/wave3-regression.test.mjs  21 tests for adversarial inputs, optimizer guards, Wilson intervals and honest reporting
 tests/wave4-regression.test.mjs  25 tests for formula-safe CSV export, fail-closed import, CSP integrity, XSS sinks and WCAG structure
 tests/wave5-regression.test.mjs  15 tests for order-invariant subgroup ids, header collisions, calibration softening, tree missing-value routing and ARIA consolidation
+tests/wave6-workbench.test.mjs   60 tests for MCE, slices, policy fits, frontier and workbench invariants
+tests/wave7-cert.test.mjs        52 tests for SHA-256 vectors, canonical JSON, certificate exports and bookmarking
+tests/wave8-svg-ui.test.mjs      SVG chart rendering on a DOM stub plus HTML and CSS structure
 video/narration.txt        2-5 minute demo narration
 video/steps.json           verified demo click/tap choreography
 ```

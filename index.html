@@ -223,6 +223,107 @@
       <p class="table-note" id="tradeoff-note">--</p>
     </section>
 
+    <!-- Calibration and uncertainty workbench -->
+    <section id="workbench" class="section" aria-labelledby="workbench-title">
+      <div class="section-head">
+        <div>
+          <h2 id="workbench-title">How sure is the score. Who pays for the fix.</h2>
+        </div>
+      </div>
+
+      <div class="charts-grid">
+        <figure class="chart-card">
+          <figcaption>
+            <span class="chart-title">Reliability, with uncertainty</span>
+            <span class="chart-sub" id="relwb-sub">10 equal-width bins</span>
+          </figcaption>
+          <div id="reliability-svg"></div>
+          <label class="check-line"><input type="checkbox" id="overlay-groups" checked> Overlay subgroup curves</label>
+          <p class="chart-caption" id="relwb-caption">Hover a point for its bin counts and interval.</p>
+        </figure>
+        <figure class="chart-card">
+          <figcaption>
+            <span class="chart-title">Clinical utility frontier</span>
+            <span class="chart-sub" id="frontier-sub">held-out achievable trade-off</span>
+          </figcaption>
+          <div id="frontier-svg"></div>
+          <ul class="chart-legend" id="frontier-legend"></ul>
+          <p class="chart-caption" id="frontier-caption">Hover a curve point or policy marker.</p>
+        </figure>
+      </div>
+
+      <h3 class="subhead">Four threshold policies, every cost on the table.</h3>
+      <div class="table-wrap" tabindex="0" aria-label="Threshold policy comparator, scroll horizontally if needed">
+        <table class="compare-table" id="comparator-table">
+          <thead>
+            <tr>
+              <th scope="col">Policy</th>
+              <th scope="col">Threshold</th>
+              <th scope="col">Recall</th>
+              <th scope="col">Missed &Delta;</th>
+              <th scope="col">Alerts &Delta;</th>
+              <th scope="col">EO gap &darr;</th>
+              <th scope="col">FNR gap &darr;</th>
+              <th scope="col">PPV gap &darr;</th>
+              <th scope="col">Alert cal. gap</th>
+            </tr>
+          </thead>
+          <tbody id="comparator-rows"></tbody>
+        </table>
+      </div>
+      <p class="table-note" id="comparator-note">--</p>
+
+      <h3 class="subhead">Intersectional slices, with small-cell warnings.</h3>
+      <div class="table-wrap" tabindex="0" aria-label="Intersectional subgroup slices, scroll horizontally if needed">
+        <table class="compare-table" id="slices-table">
+          <thead>
+            <tr>
+              <th scope="col">Intersectional cell</th>
+              <th scope="col">n</th>
+              <th scope="col">Missed rate (95% CI)</th>
+              <th scope="col">Alert rate</th>
+              <th scope="col">PPV (95% CI)</th>
+              <th scope="col">Flag</th>
+            </tr>
+          </thead>
+          <tbody id="slices-rows"></tbody>
+        </table>
+      </div>
+      <p class="table-note" id="slices-note">--</p>
+    </section>
+
+    <!-- Audit certificate and self tests -->
+    <section id="certificate" class="section" aria-labelledby="cert-title">
+      <div class="section-head">
+        <div>
+          <h2 id="cert-title">A certificate a judge can recompute.</h2>
+        </div>
+      </div>
+      <div class="cert-grid">
+        <div class="card">
+          <h3>Integrity hash</h3>
+          <p class="cert-hash-line"><code id="cert-hash">--</code></p>
+          <p class="cert-sub" id="cert-sub">--</p>
+          <div class="cert-actions">
+            <button class="button ghost small" id="cert-json" type="button">Certificate JSON</button>
+            <button class="button ghost small" id="cert-csv" type="button">Certificate CSV</button>
+            <button class="button ghost small" id="cert-md" type="button">Markdown report</button>
+            <button class="button ghost small" id="copy-link" type="button">Copy share link</button>
+          </div>
+          <p class="cert-sub">The hash seals the canonical audit inputs and outputs. It is an integrity
+            digest, not a cryptographic signature; anyone can recompute it from the JSON export:
+            remove <code>sha256</code>, sort every object's keys at every depth, compact
+            <code>JSON.stringify</code>, UTF-8 encode, SHA-256 hex.</p>
+        </div>
+        <div class="card">
+          <h3>Self-tests</h3>
+          <p class="cert-sub" id="selftest-summary">Verification checks that run inside this page.</p>
+          <button class="button primary" id="run-selftests" type="button">Run self-tests</button>
+          <ul class="selftest-list" id="selftest-list"></ul>
+        </div>
+      </div>
+    </section>
+
     <!-- Explainability + model card -->
     <section class="section two-col" aria-labelledby="explain-title">
       <div class="card">

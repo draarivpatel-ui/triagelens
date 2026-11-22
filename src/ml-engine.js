@@ -9,6 +9,8 @@
  * Every record is synthetic. No row is a real patient, student, or shelter guest.
  */
 
+import { buildWorkbench } from './calibration.js';
+
 /* ------------------------------------------------------------------ */
 /* Deterministic random numbers and helpers                            */
 /* ------------------------------------------------------------------ */
@@ -1066,7 +1068,7 @@ function selectionAt(indices, scores, t) {
  * or test) is scanned first, so a fitted threshold map can never swap
  * groups between arrays.
  */
-function computeGroupIds(rows, subgroupKey) {
+export function computeGroupIds(rows, subgroupKey) {
   const ids = new Array(rows.length);
   let maxNum = 0;
   let hasNum = false;
@@ -1571,6 +1573,17 @@ export function runAudit(options = {}) {
     baseline,
     roc: rocCurve(calTest, ys),
     reliability: reliabilityDiagram(calTest, ys, 10),
+    workbench: buildWorkbench({
+      scenarioId: scenario.id,
+      trainRows: train,
+      trainScores: calTrain,
+      testRows: test,
+      testScores: calTest,
+      ysTest: ys,
+      subgroupKey,
+      groupLabels: scenario.groupLabels,
+      reference: threshold
+    }),
     counterexamples,
     failures,
     performance: {
