@@ -119,6 +119,7 @@ tests/wave5-regression.test.mjs  15 tests for order-invariant subgroup ids, head
 tests/wave6-workbench.test.mjs   60 tests for MCE, slices, policy fits, frontier and workbench invariants
 tests/wave7-cert.test.mjs        52 tests for SHA-256 vectors, canonical JSON, certificate exports and bookmarking
 tests/wave8-svg-ui.test.mjs      SVG chart rendering on a DOM stub plus HTML and CSS structure
+tests/wave9-revamp.test.mjs       fairness arithmetic, hostile-input hardening, malformed CSV and keyboard names
 video/narration.txt        2-5 minute demo narration
 video/steps.json           verified demo click/tap choreography
 ```

@@ -69,6 +69,34 @@ export function sanitizeNumber(x, fallback = 0) {
   return Number.isFinite(n) ? n : fallback;
 }
 
+function finiteOr(value, fallback) {
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function normalizeFeatureKeys(input, fallback) {
+  const base = Array.isArray(fallback) ? fallback : [];
+  if (!Array.isArray(input)) return base.slice();
+  const seen = new Set();
+  const out = [];
+  for (const key of input) {
+    if (typeof key !== 'string' || !key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(key);
+  }
+  return out.length ? out : base.slice();
+}
+
+/** Deterministic ordering for numeric, fractional, string and mixed ids. */
+export function compareIds(a, b) {
+  const an = typeof a === 'number' && Number.isFinite(a);
+  const bn = typeof b === 'number' && Number.isFinite(b);
+  if (an && bn) return a - b;
+  if (an !== bn) return an ? -1 : 1;
+  const as = String(a);
+  const bs = String(b);
+  return as < bs ? -1 : as > bs ? 1 : 0;
+}
+
 function mean(xs) {
   if (!xs || !xs.length) return 0;
   let s = 0;
@@ -347,11 +375,12 @@ function standardizeOne(row, stats) {
 /** Full batch gradient descent on L2 regularized log loss. */
 export function trainLogisticRegression(rows, options = {}) {
   const started = nowMs();
+  const opts = options && typeof options === 'object' ? options : {};
   const rr = Array.isArray(rows) ? rows : [];
-  const keys = (options && options.featureKeys) || ['symptomSeverity', 'waitDays', 'hasProvider', 'ageYears'];
-  const l2 = options.l2 ?? 0.02;
-  const epochs = options.epochs ?? 120;
-  const lr = options.lr ?? 0.35;
+  const keys = normalizeFeatureKeys(opts.featureKeys, ['symptomSeverity', 'waitDays', 'hasProvider', 'ageYears']);
+  const l2 = clamp(finiteOr(opts.l2, 0.02), 0, 1000);
+  const epochs = Math.max(0, Math.floor(finiteOr(opts.epochs, 120)));
+  const lr = clamp(finiteOr(opts.lr, 0.35), 0, 10);
   const { stats, z } = standardize(rr, keys);
   const p = keys.length;
   const w = new Array(p).fill(0);
@@ -478,7 +507,7 @@ function buildTree(rows, keys, depth, maxDepth, minLeaf) {
 }
 
 function treeFeature(v) {
-  return typeof v === 'number' && Number.isFinite(v) ? v : NaN;
+  return sanitizeNumber(v, NaN);
 }
 
 function treeProba(node, row) {
@@ -519,10 +548,11 @@ function collectRules(node) {
 
 export function trainDecisionTree(rows, options = {}) {
   const started = nowMs();
+  const opts = options && typeof options === 'object' ? options : {};
   const rr = Array.isArray(rows) ? rows : [];
-  const keys = (options && options.featureKeys) || ['symptomSeverity', 'waitDays', 'hasProvider', 'ageYears'];
-  const maxDepth = options.maxDepth ?? 3;
-  const minLeaf = options.minLeaf ?? 24;
+  const keys = normalizeFeatureKeys(opts.featureKeys, ['symptomSeverity', 'waitDays', 'hasProvider', 'ageYears']);
+  const maxDepth = Math.max(0, Math.floor(finiteOr(opts.maxDepth, 3)));
+  const minLeaf = Math.max(1, Math.floor(finiteOr(opts.minLeaf, 24)));
   if (!rr.length) {
     const emptyTree = { leaf: true, n: 0, positives: 0, p: 0.5 };
     return { kind: 'tree', keys: keys.slice(), tree: emptyTree, rules: [{ conditions: [], probability: 0.5, n: 0 }], leaves: 1, maxDepth, depth: 0, predictProba: () => 0.5, ms: nowMs() - started };
@@ -716,14 +746,16 @@ export function classMetrics(c) {
   const precision = c.tp + c.fp ? c.tp / (c.tp + c.fp) : 0;
   const recall = c.tp + c.fn ? c.tp / (c.tp + c.fn) : 0;
   const specificity = c.tn + c.fp ? c.tn / (c.tn + c.fp) : 0;
+  const hasPositives = c.tp + c.fn > 0;
+  const hasNegatives = c.tn + c.fp > 0;
   return {
     ...c,
     precision,
     recall,
     specificity,
     tpr: recall,
-    fnr: 1 - recall,
-    fpr: 1 - specificity,
+    fnr: hasPositives ? 1 - recall : 0,
+    fpr: hasNegatives ? 1 - specificity : 0,
     f1: precision + recall ? (2 * precision * recall) / (precision + recall) : 0,
     accuracy: c.tp + c.fp + c.tn + c.fn ? (c.tp + c.tn) / (c.tp + c.fp + c.tn + c.fn) : 0
   };
@@ -807,31 +839,34 @@ function ysAt(rows, i) {
 }
 
 export function fairnessSummary(groups, subgroupKey) {
-  const ids = Object.keys(groups).map(Number).sort((a, b) => a - b);
+  const safeGroups = groups && typeof groups === 'object' ? groups : {};
+  const ids = Object.keys(safeGroups).map((k) => {
+    const n = Number(k);
+    return Number.isFinite(n) && String(n) === k ? n : k;
+  }).sort(compareIds);
   if (ids.length === 0) {
     const empty = { n: 0, positives: 0, prevalence: 0, selectionRate: 0, tpr: 0, fnr: 0, fpr: 0, ppv: 0, npv: 0, calibrationError: 0, counts: { tp: 0, fp: 0, tn: 0, fn: 0 } };
     return { subgroupKey, groups: [], groupA: empty, groupB: empty, demographicParityGap: 0, equalOpportunityGap: 0, equalOpportunityGapRatio: 0, fnrDisparity: 0, fnrRatio: 1, fprDisparity: 0, ppvDisparity: 0, npvDisparity: 0, subgroupCalibrationGap: 0 };
   }
-  const a = groups[ids[0]];
-  const b = ids.length > 1 ? groups[ids[ids.length - 1]] : groups[ids[0]];
+  const a = safeGroups[ids[0]];
+  const b = ids.length > 1 ? safeGroups[ids[ids.length - 1]] : safeGroups[ids[0]];
   // Disparities are the worst gap across every pair of groups, so a third or
   // further subgroup can never sit invisibly between the two displayed
   // extremes. With two groups this reduces to |a - b| exactly.
   const maxPair = (f) => {
     let m = 0;
-    for (const i of ids) for (const j of ids) m = Math.max(m, Math.abs((f(groups[i]) || 0) - (f(groups[j]) || 0)));
+    for (const i of ids) for (const j of ids) m = Math.max(m, Math.abs((f(safeGroups[i]) || 0) - (f(safeGroups[j]) || 0)));
     return m;
   };
-  const maxSel = Math.max(...ids.map((i) => groups[i].selectionRate));
-  const maxTpr = Math.max(...ids.map((i) => groups[i].tpr));
-  const maxFnr = Math.max(...ids.map((i) => groups[i].fnr));
-  const minFnr = Math.min(...ids.map((i) => groups[i].fnr));
+  const maxTpr = Math.max(...ids.map((i) => safeGroups[i].tpr));
+  const maxFnr = Math.max(...ids.map((i) => safeGroups[i].fnr));
+  const minFnr = Math.min(...ids.map((i) => safeGroups[i].fnr));
   return {
     subgroupKey,
     groups: ids,
     groupA: a,
     groupB: b,
-    demographicParityGap: maxSel > 0 ? maxPair((g) => g.selectionRate) / maxSel : 0,
+    demographicParityGap: maxPair((g) => g.selectionRate),
     equalOpportunityGap: maxPair((g) => g.tpr),
     equalOpportunityGapRatio: maxTpr > 0 ? maxPair((g) => g.tpr) / maxTpr : 0,
     fnrDisparity: maxPair((g) => g.fnr),
@@ -866,13 +901,14 @@ export function wilsonInterval(successes, n, z = 1.96) {
 
 /** q = sigmoid(a * logit(p) + b). Temperature = 1 / a. */
 export function fitCalibration(scores, ys, options = {}) {
+  const opts = options && typeof options === 'object' ? options : {};
   const sc = Array.isArray(scores) ? scores : [];
   const yy = Array.isArray(ys) ? ys : [];
-  const epochs = (options && options.epochs) ?? 500;
-  const lr = (options && options.lr) ?? 0.1;
-  const fitIntercept = (options && options.fitIntercept) ?? true;
-  let a = (options && options.initA) ?? 1;
-  let b = (options && options.initB) ?? 0;
+  const epochs = Math.max(0, Math.floor(finiteOr(opts.epochs, 500)));
+  const lr = clamp(finiteOr(opts.lr, 0.1), 0, 10);
+  const fitIntercept = opts.fitIntercept ?? true;
+  let a = finiteOr(opts.initA, 1);
+  let b = finiteOr(opts.initB, 0);
   const n = sc.length;
   if (n === 0 || n !== yy.length) {
     const apply = (p) => sanitizeNumber(p, 0.5);
@@ -897,12 +933,18 @@ export function fitCalibration(scores, ys, options = {}) {
     if (fitIntercept) b -= (lr * gb) / n;
     loss = ll / n;
   }
-  // Slopes below 1 soften overconfident scores and are legitimate Platt fits;
-  // the Brier+ECE identity fallback below still rejects any fit that would be
-  // worse than doing nothing on the fitting split.
-  a = clamp(a, 0.05, 20);
+  // Slopes below 1 soften overconfident scores and are legitimate Platt fits.
+  // A diverged or hostile optimizer falls back to the identity rather than
+  // leaking NaN into every downstream probability.
+  if (!Number.isFinite(a) || !Number.isFinite(b)) {
+    a = 1;
+    b = 0;
+  } else {
+    a = clamp(a, 0.05, 20);
+    b = clamp(b, -50, 50);
+  }
   const apply = (p) => {
-    const z = clamp(p, 1e-9, 1 - 1e-9);
+    const z = clamp(sanitizeNumber(p, 0), 1e-9, 1 - 1e-9);
     return sigmoid(a * Math.log(z / (1 - z)) + b);
   };
   let calibrated = sc.map(apply);
@@ -914,6 +956,7 @@ export function fitCalibration(scores, ys, options = {}) {
     b = 0;
     calibrated = scores.slice();
   }
+  if (!Number.isFinite(loss)) loss = brierScore(sc.map(apply), yy);
   return {
     kind: 'platt-temperature',
     a,
@@ -1370,7 +1413,7 @@ export function runAudit(options = {}) {
   const test = data.test;
   const subgroupKey = scenario.subgroupKey;
 
-  const lr = trainLogisticRegression(train, { featureKeys, l2: options.l2 ?? 0.02, epochs: options.epochs ?? 400 });
+  const lr = trainLogisticRegression(train, { featureKeys, l2: options.l2 ?? 0.02, epochs: options.epochs ?? 400, lr: options.lr });
   const tree = trainDecisionTree(train, { featureKeys });
   const trainRaw = train.map((r) => lr.predictProba(r));
   const trainYs = train.map((r) => r.y);
@@ -1637,6 +1680,7 @@ export function parseCsv(text) {
   // Remove completely empty trailing rows
   while (records.length && records[records.length - 1].length === 1 && records[records.length - 1][0] === '' && records.length > 1) records.pop();
 
+  const endedInQuotes = inQuotes;
   if (!records.length) return { headers: [], rows: [], skipped: 0, duplicates: [] };
   const rawHeaders = records[0].map((h) => String(h).trim());
   // Duplicate headers get deterministic suffixes so no column's data is lost,
@@ -1665,7 +1709,7 @@ export function parseCsv(text) {
   for (let r = 1; r < records.length; r++) {
     const rec = records[r];
     if (rec.length === 1 && rec[0] === '') continue;
-    if (rec.length !== headers.length) { skipped++; continue; }
+    if ((endedInQuotes && r === records.length - 1) || rec.length !== headers.length) { skipped++; continue; }
     const obj = {};
     headers.forEach((h, j) => {
       const raw = rec[j];

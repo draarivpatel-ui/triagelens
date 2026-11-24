@@ -578,6 +578,7 @@ function wire() {
   $('theme-toggle').addEventListener('click', () => {
     const dark = document.documentElement.getAttribute('data-theme') === 'dark';
     document.documentElement.setAttribute('data-theme', dark ? 'light' : 'dark');
+    $('theme-toggle').setAttribute('aria-pressed', dark ? 'false' : 'true');
     if (state.audit) {
       renderCharts(state.audit);
       renderWorkbench(state.audit);

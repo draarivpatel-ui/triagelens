@@ -240,7 +240,7 @@ test('drawFrontierSvg draws one marker group per policy with data-policy', () =>
   assert.equal(markers.length, 4);
   assert.deepEqual(markers.map((m) => m.attrs['data-policy']), ['global', 'sensitivity-floor', 'subgroup-calibrated', 'youden']);
   for (const m of markers) {
-    assert.equal(m.attrs['aria-label'], POLICIES[markers.indexOf(m)].label);
+    assert.ok(m.attrs['aria-label'].startsWith(POLICIES[markers.indexOf(m)].label + ':'));
     assert.equal(m.attrs.tabindex, '0');
   }
 });
@@ -392,7 +392,7 @@ test('package.json still runs the node test runner', () => {
 
 test('README test inventory lists every wave file', () => {
   const readme = read('README.md');
-  for (const f of ['ml-engine.test.mjs', 'wave2-regression.test.mjs', 'wave3-regression.test.mjs', 'wave4-regression.test.mjs', 'wave5-regression.test.mjs', 'wave6-workbench.test.mjs', 'wave7-cert.test.mjs', 'wave8-svg-ui.test.mjs']) {
+  for (const f of ['ml-engine.test.mjs', 'wave2-regression.test.mjs', 'wave3-regression.test.mjs', 'wave4-regression.test.mjs', 'wave5-regression.test.mjs', 'wave6-workbench.test.mjs', 'wave7-cert.test.mjs', 'wave8-svg-ui.test.mjs', 'wave9-revamp.test.mjs']) {
     assert.ok(readme.includes(f), f + ' undocumented in README');
   }
 });

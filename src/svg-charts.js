@@ -132,13 +132,13 @@ export function drawReliabilitySvg(host, { bins, overlay, groupLabels = {}, show
         stroke: p.ink, 'stroke-width': 1.2, opacity: 0.55
       }, g);
     }
-    el('title', {}, g).textContent =
-      'bin ' + b.lo.toFixed(1) + ' to ' + b.hi.toFixed(1) + ': predicted ' + b.confidence.toFixed(3) +
-      ', observed ' + b.observed.toFixed(3) + ', n=' + b.n;
-    g.setAttribute('aria-label', 'reliability bin');
-    hover(g, 'bin ' + b.lo.toFixed(1) + ' to ' + b.hi.toFixed(1) + ': predicted ' + b.confidence.toFixed(3) +
+    const label = 'bin ' + b.lo.toFixed(1) + ' to ' + b.hi.toFixed(1) + ': predicted ' + b.confidence.toFixed(3) +
       ', observed ' + b.observed.toFixed(3) + ', n=' + b.n +
-      (b.observedCi ? ', 95% CI ' + b.observedCi.lo.toFixed(2) + ' to ' + b.observedCi.hi.toFixed(2) : ''));
+      (b.observedCi ? ', 95% CI ' + b.observedCi.lo.toFixed(2) + ' to ' + b.observedCi.hi.toFixed(2) : '');
+    el('title', {}, g).textContent = label;
+    g.setAttribute('role', 'img');
+    g.setAttribute('aria-label', label);
+    hover(g, label);
   }
 
   // Per-subgroup overlay: hollow markers at each group's own bin means.
@@ -160,6 +160,8 @@ export function drawReliabilitySvg(host, { bins, overlay, groupLabels = {}, show
         const label = name + ', bin ' + b.lo.toFixed(1) + ' to ' + b.hi.toFixed(1) + ': predicted ' +
           b.confidence.toFixed(3) + ', observed ' + b.observed.toFixed(3) + ', n=' + b.n;
         el('title', {}, gg).textContent = label;
+        gg.setAttribute('role', 'img');
+        gg.setAttribute('aria-label', label);
         hover(gg, label);
       }
     });
@@ -253,7 +255,8 @@ export function drawFrontierSvg(host, { points, byGroup, groupLabels = {}, polic
     const label = pp.label + ': alerts ' + (pp.sel * 100).toFixed(1) +
       ' per 100, missed ' + (pp.fnr * 100).toFixed(1) + ' per 100 positives';
     el('title', {}, g).textContent = label;
-    g.setAttribute('aria-label', pp.label);
+    g.setAttribute('role', 'img');
+    g.setAttribute('aria-label', label);
     hover(g, label);
   });
   return svg;

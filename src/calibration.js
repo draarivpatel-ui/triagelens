@@ -23,7 +23,8 @@ import {
   binStats,
   expectedCalibrationError,
   reliabilityDiagram,
-  computeGroupIds
+  computeGroupIds,
+  compareIds
 } from './ml-engine.js';
 
 /** Cells smaller than this carry an automatic reliability warning. */
@@ -210,7 +211,7 @@ export function sliceMetrics({
       counts: { tp: c.tp, fp: c.fp, tn: c.tn, fn: c.fn }
     };
   });
-  cells.sort((a, b) => (a.group - b.group) || (a.slice - b.slice));
+  cells.sort((a, b) => compareIds(a.group, b.group) || compareIds(a.slice, b.slice));
   return {
     minN: min,
     cells,
@@ -368,7 +369,7 @@ function recallAt(scores, ys, t) {
 export function fitSensitivityFloor(scores, ys, floor = DEFAULT_FLOOR) {
   const ss = Array.isArray(scores) ? scores : [];
   const yy = Array.isArray(ys) ? ys : [];
-  const target = Number.isFinite(floor) ? floor : DEFAULT_FLOOR;
+  const target = Number.isFinite(floor) ? Math.min(1, Math.max(0, floor)) : DEFAULT_FLOOR;
   const candidates = thresholdCandidates(ss);
   let best = null;
   for (const t of candidates) {
@@ -443,7 +444,9 @@ export function fitRateMatchThresholds(rows, scores, subgroupKey, reference = 0.
   }
   const thresholds = {};
   const fitDetail = {};
-  for (const [g, idx] of byGroup) {
+  const orderedGroups = [...byGroup.keys()].sort(compareIds);
+  for (const g of orderedGroups) {
+    const idx = byGroup.get(g);
     const gScores = idx.map((i) => ss[i]);
     const gYs = idx.map((i) => (rr[i] && rr[i].y ? 1 : 0));
     const prevalence = meanLocal(gYs);
@@ -492,7 +495,7 @@ export function thresholdFrontier(scores, ys, ids) {
   const candidates = thresholdCandidates(ss);
   const groupSet = new Set();
   for (let i = 0; i < n; i++) groupSet.add(ii[i]);
-  const groupIds = [...groupSet].sort((a, b) => a - b);
+  const groupIds = [...groupSet].sort(compareIds);
   const points = [];
   const byGroup = {};
   for (const g of groupIds) byGroup[g] = [];
