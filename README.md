@@ -48,9 +48,9 @@ npm test        # or: node --test
 `node --test` (Node v26.8.1):
 
 ```text
-ℹ tests 363
+ℹ tests 380
 ℹ suites 0
-ℹ pass 363
+ℹ pass 380
 ℹ fail 0
 ℹ cancelled 0
 ℹ skipped 0

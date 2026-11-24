@@ -194,3 +194,14 @@ test('theme toggle exposes and updates a pressed state', () => {
   assert.match(html, /id="theme-toggle"[^>]*aria-pressed="false"/);
   assert.match(app, /setAttribute\('aria-pressed'/);
 });
+
+test('model weight labels wrap instead of truncating on narrow cards', () => {
+  const css = readFileSync(new URL('../styles.css', import.meta.url), 'utf8');
+  const app = readFileSync(new URL('../src/app.js', import.meta.url), 'utf8');
+  const row = css.slice(css.indexOf('.weight-row {'), css.indexOf('.weight-track {'));
+  assert.match(row, /grid-template-columns:\s*minmax\(0,\s*1fr\)/, 'label column is not fluid');
+  assert.match(row, /grid-column:\s*1\s*\/\s*-1/, 'label is not given the full row');
+  assert.doesNotMatch(row, /text-overflow:\s*ellipsis/, 'label still ellipsizes');
+  assert.doesNotMatch(row, /white-space:\s*nowrap/, 'label cannot wrap');
+  assert.match(app, /label\.title\s*=\s*label\.textContent/, 'full label is not available on hover');
+});

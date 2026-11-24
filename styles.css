@@ -330,8 +330,10 @@ canvas { display: block; width: 100%; height: auto; background: transparent; }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 24px; min-width: 0; }
 .card-intro { font-size: 13px; color: var(--ink-soft); }
 .weight-bars { display: flex; flex-direction: column; gap: 12px; margin: 20px 0; }
-.weight-row { display: grid; grid-template-columns: 160px 1fr 58px; align-items: center; gap: 10px; font-size: 12px; }
-.weight-row span:first-child { color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.weight-row { display: grid; grid-template-columns: minmax(0, 1fr) 58px; align-items: center; gap: 4px 10px; font-size: 12px; }
+.weight-row span:first-child { grid-column: 1 / -1; grid-row: 1; color: var(--ink-soft); overflow-wrap: anywhere; }
+.weight-row .weight-track { grid-column: 1; grid-row: 2; }
+.weight-row .weight-value { grid-column: 2; grid-row: 2; }
 .weight-track { height: 10px; background: var(--panel-alt); border-radius: 999px; position: relative; overflow: hidden; }
 .weight-fill { position: absolute; top: 0; bottom: 0; left: 50%; border-radius: 999px; }
 .weight-fill.pos { background: var(--accent); }
@@ -432,7 +434,6 @@ canvas { display: block; width: 100%; height: auto; background: transparent; }
   .section-head { flex-direction: column; align-items: start; gap: 14px; }
   .control-grid, .headline-metrics, .charts-grid, .two-col, .ethics-grid { grid-template-columns: 1fr; }
   .chart-card.wide { grid-column: auto; }
-  .weight-row { grid-template-columns: 120px 1fr 48px; }
   .footer { padding: 28px 18px; }
 }
 
