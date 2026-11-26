@@ -48,9 +48,9 @@ npm test        # or: node --test
 `node --test` (Node v26.8.1):
 
 ```text
-ℹ tests 380
+ℹ tests 384
 ℹ suites 0
-ℹ pass 380
+ℹ pass 384
 ℹ fail 0
 ℹ cancelled 0
 ℹ skipped 0
@@ -116,7 +116,7 @@ tests/wave2-regression.test.mjs  17 tests for statistical identities, CSV valida
 tests/wave3-regression.test.mjs  21 tests for adversarial inputs, optimizer guards, Wilson intervals and honest reporting
 tests/wave4-regression.test.mjs  25 tests for formula-safe CSV export, fail-closed import, CSP integrity, XSS sinks and WCAG structure
 tests/wave5-regression.test.mjs  15 tests for order-invariant subgroup ids, header collisions, calibration softening, tree missing-value routing and ARIA consolidation
-tests/wave6-workbench.test.mjs   60 tests for MCE, slices, policy fits, frontier and workbench invariants
+tests/wave6-workbench.test.mjs   62 tests for MCE, slices, policy fits, frontier and workbench invariants
 tests/wave7-cert.test.mjs        52 tests for SHA-256 vectors, canonical JSON, certificate exports and bookmarking
 tests/wave8-svg-ui.test.mjs      SVG chart rendering on a DOM stub plus HTML and CSS structure
 tests/wave9-revamp.test.mjs       fairness arithmetic, hostile-input hardening, malformed CSV and keyboard names
