@@ -1772,7 +1772,7 @@ export function csvCell(value) {
   if (value === null || value === undefined) return '';
   if (typeof value === 'number') return Number.isFinite(value) ? String(value) : '';
   let s = String(value);
-  if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
+  if (/^[\s\p{Cf}\p{Cc}]*[=+\-@\t\r]/u.test(s.normalize('NFKC'))) s = "'" + s;
   if (/[",\n\r]/.test(s)) s = '"' + s.replace(/"/g, '""') + '"';
   return s;
 }

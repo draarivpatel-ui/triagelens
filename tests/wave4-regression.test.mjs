@@ -156,11 +156,14 @@ test('parseCsv then validateCsvRows fails closed on wrong-width rows', () => {
 /* ---------------- formula-safe CSV export ---------------- */
 
 test('csvCell prefixes spreadsheet formula leaders', () => {
-  for (const evil of ['=1+1', '+SUM(A1:A2)', '-10^3', '@cmd', '\t=1', '\r=1']) {
+  for (const evil of ['=1+1', '+SUM(A1:A2)', '-10^3', '@cmd', '\t=1', '\r=1',
+    '\u200B=1', ' \uFEFF+cmd', '\u00A0@cmd', '\uFF1D2+2']) {
     const cell = csvCell(evil);
     const inner = cell.startsWith('"') ? cell.slice(1, -1).replace(/""/g, '"') : cell;
     assert.ok(inner.startsWith("'"), 'unescaped formula: ' + JSON.stringify(evil));
   }
+  assert.equal(csvCell(-10), '-10');
+  assert.equal(csvCell(' -10'), "' -10");
 });
 
 test('csvCell quotes and doubles per RFC 4180', () => {
