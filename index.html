@@ -391,6 +391,41 @@
     </section>
   </main>
 
+  <section class="print-report" id="print-report" aria-label="TriageLens audit print summary">
+    <h1>TriageLens audit summary</h1>
+    <div class="print-grid">
+      <div class="print-card">
+        <h2>Scope</h2>
+        <p>All rows are synthetic and generated locally in the browser. This teaching audit is never a clinical, educational or shelter-placement decision system.</p>
+      </div>
+      <div class="print-card">
+        <h2>Run</h2>
+        <dl>
+          <dt>Scenario</dt><dd id="print-scenario">n/a</dd>
+          <dt>Parameters</dt><dd id="print-params">n/a</dd>
+          <dt>Rows</dt><dd id="print-rows">n/a</dd>
+        </dl>
+      </div>
+      <div class="print-card">
+        <h2>Held-out quality</h2>
+        <dl>
+          <dt>Accuracy</dt><dd id="print-accuracy">n/a</dd>
+          <dt>ROC-AUC</dt><dd id="print-auc">n/a</dd>
+          <dt>Brier score</dt><dd id="print-brier">n/a</dd>
+        </dl>
+      </div>
+      <div class="print-card">
+        <h2>Fairness result</h2>
+        <dl>
+          <dt>EO gap</dt><dd id="print-gap">n/a</dd>
+          <dt>Recall</dt><dd id="print-recall">n/a</dd>
+          <dt>Digest</dt><dd id="print-digest">n/a</dd>
+        </dl>
+      </div>
+    </div>
+    <p class="print-foot">Zero dependencies | no network requests | Wilson uncertainty intervals shown in the interactive audit</p>
+  </section>
+
   <footer class="footer">
     <div>
       <p class="footer-brand">TriageLens</p>

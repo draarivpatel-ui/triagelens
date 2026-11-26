@@ -59,6 +59,7 @@ function run() {
   renderCharts(audit);
   renderHidden(audit);
   renderWorkbench(audit);
+  renderPrintSummary(audit);
   renderCertificate();
 }
 
@@ -511,6 +512,21 @@ function renderSlices(audit) {
 /* ------------------------------------------------------------------ */
 /* Certificate, self tests and bookmarking                             */
 /* ------------------------------------------------------------------ */
+
+function renderPrintSummary(audit) {
+  const b = audit.baseline.metrics;
+  const eo = audit.strategies.find((s) => s.id === 'equal-opportunity').metrics;
+  $('print-scenario').textContent = audit.scenarioName;
+  $('print-params').textContent = 'bias ' + Number($('bias').value).toFixed(2) + ' | threshold ' +
+    Number($('threshold').value).toFixed(2) + ' | seed ' + $('seed').value;
+  $('print-rows').textContent = audit.trainCount + ' train / ' + audit.testCount + ' held out';
+  $('print-accuracy').textContent = pct(b.accuracy);
+  $('print-auc').textContent = num(b.auc);
+  $('print-brier').textContent = num(b.brier);
+  $('print-gap').textContent = pct(b.groups.equalOpportunityGap) + ' -> ' + pct(eo.groups.equalOpportunityGap);
+  $('print-recall').textContent = pct(b.recall) + ' -> ' + pct(eo.recall);
+  $('print-digest').textContent = state.cert.sha256.slice(0, 16) + '...';
+}
 
 function renderCertificate() {
   if (!state.cert) return;
